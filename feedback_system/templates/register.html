@@ -1,0 +1,62 @@
+<!-- templates/register.html -->
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+<div class="container mt-5">
+<div class="row justify-content-center">
+<div class="col-md-6">
+<h2 class="mb-4">Register</h2>
+
+<form method="POST" action="{{ url_for('register') }}">
+    {{ form.csrf_token }}
+    <div class="form-group mb-3">
+        <label for="name" class="form-label">Full Name:</label>
+        {{ form.name(class="form-control", id="name", placeholder="Enter your full name") }}
+    </div>
+    <div class="form-group mb-3">
+        <label for="email" class="form-label">Strathmore Email:</label>
+        {{ form.email(class="form-control", id="email", placeholder="your.example@strathmore.edu") }}
+    </div>
+    <div class="form-group mb-3">
+        <label for="password" class="form-label">Password:</label>
+        {{ form.password(class="form-control", id="password", placeholder="Create a strong password") }}
+        <small class="form-text text-muted">
+            Password must be at least 12 characters long and include uppercase, lowercase, number, and special character.
+        </small>
+    </div>
+    <div class="form-group mb-3">
+        <label for="confirm_password" class="form-label">Confirm Password:</label>
+        {{ form.confirm_password(class="form-control", id="confirm_password", placeholder="Repeat your password") }}
+    </div>
+    <button type="submit" class="btn btn-primary w-100">{{ form.submit.label }}</button>
+</form>
+
+
+<div class="text-center mt-3">
+<p>Already have an account? <a href="{{ url_for('login') }}">Login here</a></p>
+</div>
+</div>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+        const passwordInput = document.getElementById('password');
+        const confirmPasswordInput = document.getElementById('confirm_password');
+
+        function validatePassword() {
+        if (passwordInput.value !== confirmPasswordInput.value) {
+        confirmPasswordInput.setCustomValidity("Passwords do not match");
+        } else {
+        confirmPasswordInput.setCustomValidity("");
+        }
+        }
+
+        passwordInput.addEventListener('input', validatePassword);
+        confirmPasswordInput.addEventListener('input', validatePassword);
+        });
+    </script>
+{% endblock %}
+

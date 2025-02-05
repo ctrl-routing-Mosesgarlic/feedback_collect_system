@@ -1,0 +1,15 @@
+<form method="POST">
+    {{ form.csrf_token }}
+    <div class="question-group">
+        <h4>Service Feedback for {{ department.name }}</h4>
+        <textarea class="form-control" name="questions" rows="8">
+How would you rate your overall experience?
+Were your needs met effectively?
+How satisfied are you with the response time?
+Were the available resources sufficient?
+Were the facilities clean and well-maintained?
+What can we improve to enhance your experience?
+        </textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Questions</button>
+</form>

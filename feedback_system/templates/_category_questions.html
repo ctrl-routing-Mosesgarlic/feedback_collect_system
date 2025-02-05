@@ -1,0 +1,29 @@
+{% for question in questions %}
+<div class="form-group mb-3">
+    <label for="{{ category }}_{{ loop.index }}">{{ question.question }}</label>
+    {% if question.type == 'general' %}
+        <textarea
+            id="{{ category }}_{{ loop.index }}"
+            name="category_questions[{{ category }}][{{ loop.index }}]"
+            class="form-control"
+            rows="3"
+            required
+        ></textarea>
+    {% elif question.type == 'rating' %}
+        <div class="rating-input">
+            <input type="range" min="1" max="5"
+                id="{{ category }}_{{ loop.index }}"
+                name="category_questions[{{ category }}][{{ loop.index }}]"
+                class="form-range">
+        </div>
+    {% elif question.type == 'feedback' %}
+        <textarea
+            id="{{ category }}_{{ loop.index }}"
+            name="category_questions[{{ category }}][{{ loop.index }}]"
+            class="form-control"
+            rows="4"
+            required
+        ></textarea>
+    {% endif %}
+</div>
+{% endfor %}

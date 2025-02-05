@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Service Feedback Design{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">Design Service Feedback Form</h2>
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Campaign Details</h5>
+            <p class="card-text"><strong>Title:</strong> {{ campaign.title }}</p>
+            <p class="card-text"><strong>Description:</strong> {{ campaign.description }}</p>
+        </div>
+    </div>
+
+    <form method="POST" action="{{ url_for('save_service_feedback', campaign_id=campaign.campaign_id) }}" class="mb-4">
+        <div class="form-group mb-3">
+            <label for="service_name" class="form-label">Service Name</label>
+            <input type="text" name="service_name" id="service_name" class="form-control" required>
+        </div>
+
+        <div class="form-group mb-3">
+            <label for="question" class="form-label">Question</label>
+            <textarea name="question" id="question" class="form-control" rows="3" required></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Add Question</button>
+    </form>
+
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Current Questions</h5>
+        </div>
+        <div class="card-body">
+            {% if questions %}
+                <div class="list-group">
+                    {% for question in questions %}
+                        <div class="list-group-item">
+                            <h6 class="mb-1">{{ question.question }}</h6>
+                            <small class="text-muted">Service: {{ question.service_name }}</small>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-muted">No questions added yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

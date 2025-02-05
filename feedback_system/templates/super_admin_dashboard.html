@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Super Admin Dashboard{% endblock %}
+{% block content %}
+<!-- Welcome Message -->
+<div class="jumbotron jumbotron-fluid">
+    <div class="container">
+        
+        <p class="lead">This is your dashboard.</p>
+    </div>
+</div>
+
+<style>
+    /* Custom CSS to reduce the font size of the welcome message */
+    .welcome-message {
+        font-size: 1.5rem;
+        font-weight: normal;
+    }
+    
+    /* Style for the dashboard heading */
+    h1 {
+        background-color: #8B4513;
+        color: white;
+        padding: 2px;
+        margin-bottom: 2px;
+    }
+    
+    /* Style for the role-specific actions */
+    .role-actions {
+        background-color: #006400;
+        color: white;
+        padding: 5px;
+        margin-bottom: 5px;
+    }
+    
+    /* Style for the links */
+    a {
+        color: rgb(112, 181, 204);
+        text-decoration: none;
+        padding: 5px;
+        display: inline-block;
+    }
+    
+    a:hover {
+        text-decoration: underline;
+    }
+
+    /* Table styling */
+    .table {
+        width: 100%;
+        margin-bottom: 1rem;
+        color: #212529;
+        border-collapse: collapse;
+    }
+    .table th, .table td {
+        padding: 0.75rem;
+        vertical-align: top;
+        border-top: 1px solid #dee2e6;
+    }
+    .table thead th {
+        vertical-align: bottom;
+        border-bottom: 2px solid #dee2e6;
+    }
+    .table tbody + tbody {
+        border-top: 2px solid #dee2e6;
+    }
+</style>
+
+<!-- Only display the buttons for super_admin -->
+{% if user_role == 'super_admin' %}
+<div class="role-actions" style="margin-bottom: 20px;">
+    <p>Only super-admins can access this section.</p>
+    <a href="{{ url_for('assign_role') }}" class="btn btn-secondary">Assign Roles</a>
+    <a href="{{ url_for('add_department') }}" class="btn btn-secondary">Manage Department</a>
+</div>
+{% endif %}
+
+<!-- List all users -->
+<h2>Users</h2>
+<table class="table table-bordered">
+    <thead>
+        <tr>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Department</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in users %}
+            <tr>
+                <td>{{ user.username }}</td>
+                <td>{{ user.role }}</td>
+                <td>
+                    {% if user.department_id %}
+                        {{ Department.query.get(user.department_id).name }}
+                    {% else %}
+                        None
+                    {% endif %}
+                </td>
+                <td>
+                    <!-- Form to assign role -->
+                    <form action="{{ url_for('assign_role') }}" method="POST" style="display:inline;">
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <select name="role" class="form-control">
+                            <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option>
+                            <option value="regular_user" {% if user.role == 'regular_user' %}selected{% endif %}>Regular User</option>
+                        </select>
+                        <button type="submit" class="btn btn-primary btn-sm">Assign Role</button>
+                    </form>
+
+                    <!-- Form to assign department -->
+                    <form action="{{ url_for('assign_department') }}" method="POST" style="display:inline;">
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <select name="department_id" class="form-control">
+                            <option value="">None</option>
+                            {% for department in departments %}
+                                <option value="{{ department.id }}" {% if user.department_id == department.id %}selected{% endif %}>
+                                    {{ department.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-primary btn-sm">Assign Department</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

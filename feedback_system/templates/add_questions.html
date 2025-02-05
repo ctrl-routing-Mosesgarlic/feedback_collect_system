@@ -1,0 +1,44 @@
+{% comment %} {% comment %} <!-- templates/add_questions.html -->
+{% extends "base.html" %}
+{% block title %}Add Questions{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Add Questions to {{ campaign.title }}</h2>
+    <form method="POST" action="{{ url_for('add_questions', campaign_id=campaign.campaign_id) }}">
+        {{ form.csrf_token }}
+        <div class="form-group mb-4">
+            <label>Default Questions:</label>
+            <ul class="list-group">
+                {% for i in range(default_questions|length) %}
+                    <li class="list-group-item">
+                        {{ default_questions[i] }} 
+                        <span class="badge bg-secondary">Type: {{ question_types[i] }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="form-group mb-4">
+            <label for="question_text">Additional Questions:</label>
+            {{ form.questions(class="form-control", rows="3", placeholder="Enter additional questions") }}
+            {% if form.questions.errors %}
+                {% for error in form.questions.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+
+        <div class="form-group mb-4">
+            <label for="question_type">Question Type:</label>
+            {{ form.question_type(class="form-control") }}
+            {% if form.question_type.errors %}
+                {% for error in form.question_type.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+
+        {{ form.submit(class="btn btn-primary") }}
+    </form>
+</div>
+{% endblock %} {% endcomment %} {% endcomment %}

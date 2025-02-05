@@ -1,0 +1,12 @@
+<form method="POST">
+    {{ form.csrf_token }}
+    <div class="question-group">
+        <label>Default General Questions</label>
+        <textarea class="form-control" name="questions" rows="5">
+What is your overall satisfaction with our services?
+What areas do you think we can improve?
+Any additional comments?
+        </textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Questions</button>
+</form>

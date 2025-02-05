@@ -1,0 +1,79 @@
+<!-- templates/manage_departments.html -->
+{% extends "base.html" %}
+{% block title %}Manage Departments{% endblock %}
+{% block content %}
+<div class="container mt-5">
+    <h2 class="text-center mb-4">Manage Departments</h2>
+
+    <!-- Add Department Form -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Add a New Department</h4>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                {{ form.hidden_tag() }}  <!-- CSRF Token -->
+                <div class="form-group mb-3">
+                    {{ form.name.label(class="form-label") }}
+                    {{ form.name(class="form-control", placeholder="Enter department name") }}
+                    {% for error in form.name.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="form-group mb-3">
+                    {{ form.admin_id.label(class="form-label") }}
+                    {{ form.admin_id(class="form-select") }}
+                    {% for error in form.admin_id.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="form-group text-center">
+                    {{ form.submit(class="btn btn-primary btn-lg") }}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Existing Departments Table -->
+    <div class="card">
+        <div class="card-header bg-secondary text-white">
+            <h4 class="mb-0">Existing Departments</h4>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Assigned Admin</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for department in departments %}
+                    <tr>
+                        <td>{{ department.name }}</td>
+                        <td>
+                            {% if department.admin %}
+                                {{ department.admin.name }}
+                            {% else %}
+                                <span class="text-muted">Unassigned</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if not department.deleted_at %}
+                            <form method="POST" action="{{ url_for('delete_department', department_id=department.department_id) }}" style="display:inline;">
+                                {{ form.hidden_tag() }}  <!-- CSRF Token -->
+                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                            </form>
+                            {% else %}
+                                    <span class="text-muted">Deleted</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

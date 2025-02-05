@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel - Manage Forms{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Admin Panel Specific Styles */
+    .admin-header {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 30px;
+    }
+
+    .search-container {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .results-table {
+        margin-top: 25px;
+    }
+
+    .results-table th {
+        background: #f1f3f5;
+        font-weight: 600;
+    }
+
+    .results-table td {
+        vertical-align: middle;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 10px;
+    }
+
+    .btn-info {
+        background-color: #0dcaf0;
+        border-color: #0dcaf0;
+        color: white;
+    }
+
+    .btn-info:hover {
+        background-color: #0bb5d8;
+        border-color: #0bb5d8;
+    }
+
+    .no-results {
+        padding: 20px;
+        text-align: center;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin-top: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="admin-header">
+        <h1>Admin Panel – Manage Feedback Forms</h1>
+    </div>
+    <div class="search-container mb-4">
+        {{ form.hidden_tag() }}  <!-- CSRF Token -->
+        <input type="text" id="searchInput" class="form-control" placeholder="Search Form by Name">
+        <button id="searchBtn" class="btn btn-primary mt-2">Search</button>
+    </div>
+    <div id="results" class="results-table"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.getElementById("searchBtn").addEventListener("click", function(){
+        let searchTerm = document.getElementById("searchInput").value;
+        fetch("/api/forms?search=" + encodeURIComponent(searchTerm))
+            .then(response => response.json())
+            .then(data => {
+                let resultsDiv = document.getElementById("results");
+                resultsDiv.innerHTML = "";
+                if (data.length === 0) {
+                    resultsDiv.innerHTML = '<div class="no-results">No forms found.</div>';
+                    return;
+                }
+                let table = document.createElement("table");
+                table.className = "table table-hover";
+                let thead = document.createElement("thead");
+                thead.innerHTML = "<tr><th>Form ID</th><th>Form Name</th><th>Actions</th></tr>";
+                table.appendChild(thead);
+                let tbody = document.createElement("tbody");
+                data.forEach(form => {
+                    let tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td>${form.id}</td>
+                        <td>${form.form_name}</td>
+                        <td class="action-buttons">
+                            <a href="feedback_form.html?form_id=${form.id}" class="btn btn-info">View Form</a>
+                            <button class="btn btn-secondary" onclick="generateQR(${form.id})">Generate QR Code</button>
+                        </td>`;
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+                resultsDiv.appendChild(table);
+            })
+            .catch(err => console.error("Error fetching forms:", err));
+    });
+
+    function generateQR(formId) {
+        const formUrl = window.location.origin + "/feedback_form.html?form_id=" + formId;
+        let form = document.createElement("form");
+        form.method = "POST";
+        form.action = "{{ url_for('generate_qr') }}";  // Update this line
+        {% comment %} form.action = "http://yourflaskdomain.com/generate"; {% endcomment %}
+        form.target = "_blank";
+        
+        let inputUrl = document.createElement("input");
+        inputUrl.type = "hidden";
+        inputUrl.name = "url";
+        inputUrl.value = formUrl;
+        form.appendChild(inputUrl);
+        
+        document.body.appendChild(form);
+        form.submit();
+        document.body.removeChild(form);
+    }
+</script>
+{% endblock %}

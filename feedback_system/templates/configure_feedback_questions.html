@@ -1,0 +1,87 @@
+<!-- templates/add_questions.html -->
+{% extends "base.html" %}
+{% block title %}Configure Feedback Questions{% endblock %}
+{% block content %}
+<div class="campaign-container">
+    <h2>Configure Questions for {{ campaign.title }}</h2>
+    
+    <!-- Feedback Type Navigation -->
+    <div class="feedback-type-nav">
+        <a href="{{ url_for('add_questions', campaign_id=campaign.campaign_id, type='general') }}"
+        class="nav-btn {% if feedback_type == 'general' %}active{% endif %}">
+        General Feedback
+        </a>
+        <a href="{{ url_for('add_questions', campaign_id=campaign.campaign_id, type='docket') }}"
+        class="nav-btn {% if feedback_type == 'docket' %}active{% endif %}">
+        Docket Feedback
+        </a>
+        <a href="{{ url_for('add_questions', campaign_id=campaign.campaign_id, type='service') }}"
+        class="nav-btn {% if feedback_type == 'service' %}active{% endif %}">
+        Service Feedback
+        </a>
+    </div>
+
+    <!-- Dynamic Form Section -->
+    <div class="form-wrapper">
+        {% if feedback_type == 'general' %}
+            {% include 'add_general_questions.html' %}
+        {% elif feedback_type == 'docket' %}
+            {% include 'add_docket_questions.html' %}
+        {% elif feedback_type == 'service' %}
+            {% include 'add_service_questions.html' %}
+        {% endif %}
+    </div>
+</div>
+
+<style>
+.campaign-container {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+}
+
+.feedback-type-nav {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.nav-btn {
+    padding: 1rem;
+    text-align: center;
+    background: #f8f9fa;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    color: #495057;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.nav-btn.active {
+    background: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+.form-wrapper {
+    padding: 2rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.question-group {
+    margin-bottom: 1.5rem;
+}
+
+.question-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: #2c3e50;
+}
+</style>
+{% endblock %}

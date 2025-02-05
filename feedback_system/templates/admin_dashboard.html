@@ -1,0 +1,196 @@
+<!-- templates/admin_dashboard.html -->
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+<!-- Welcome Message -->
+<div class="jumbotron jumbotron-fluid">
+    <div class="container">
+        
+        
+        <p class="lead">This is your dashboard.</p>
+    </div>
+</div>
+
+<style>
+    /* Custom CSS to reduce the font size of the welcome message */
+    .welcome-message {
+        font-size: 1.5rem;
+        font-weight: normal;
+    }
+    
+    /* Style for the dashboard heading */
+    h1 {
+        background-color: #8B4513;
+        color: white;
+        padding: 2px;
+        margin-bottom: 2px;
+    }
+    
+    /* Style for the role-specific actions */
+    .role-actions {
+        background-color: #006400;
+        color: white;
+        padding: 5px;
+        margin-bottom: 5px;
+    }
+    
+    /* Style for the links */
+    a {
+        color: rgb(112, 181, 204);
+        text-decoration: none;
+        padding: 5px;
+        display: inline-block;
+    }
+    
+    a:hover {
+        text-decoration: underline;
+    }
+
+    /* New styles for form selection section */
+    .form-search-section {
+        margin: 20px;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+
+    .form-preview {
+        margin-top: 20px;
+        padding: 15px;
+        border: 1px solid #eee;
+        border-radius: 5px;
+    }
+
+    .action-buttons {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 20px;
+    }
+</style>
+
+<!-- Only display the buttons for super_admin and admin -->
+{% if user_role == 'super_admin' %}
+
+{% elif user_role == 'admin' %}
+<div class="role-actions" style="margin-bottom: 20px;">
+    <p>Only admins can access this section.</p>
+    <a href="{{ url_for('create_campaign') }}" class="btn btn-secondary">Create Campaign</a>
+    <a href="{{ url_for('manage_dockets') }}" class="btn btn-secondary">Manage Dockets</a>
+    <a href="{{ url_for('department_activity') }}" class="btn btn-secondary">department_activity</a>
+    <a href="{{ url_for('manage_announcements') }}" class="btn btn-secondary">manage_announcements</a>
+    
+    
+    <!-- New Form Selection Button -->
+    <a href="#" class="btn btn-secondary" onclick="showFormSearch()">Form Selection</a>
+</div>
+
+<!-- Form Search and Selection Section -->
+<div id="formSearchSection" class="form-search-section" style="display: none;">
+    <h3>Form Search</h3>
+    <div class="form-group">
+        <input type="text" id="formSearchInput" class="form-control" placeholder="Search forms by name...">
+        <button onclick="searchForms()" class="btn btn-primary mt-2">Search</button>
+    </div>
+
+    <!-- Search Results -->
+    <div id="searchResults" class="mt-3">
+        <!-- Results will be populated dynamically -->
+    </div>
+
+    <!-- Form Preview -->
+    <div id="formPreview" class="form-preview" style="display: none;">
+        <h4>Form Preview</h4>
+        <div id="previewContent"></div>
+        
+        <div class="action-buttons">
+            <button onclick="goBackToSearch()" class="btn btn-secondary">Back to Search</button>
+            
+            <div class="form-group">
+                <select id="actionSelect" class="form-control" onchange="handleActionChange()">
+                    <option value="">Select Action</option>
+                    <option value="download">Download Template</option>
+                    <option value="qrcode">Generate QR Code</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="downloadSection" style="display: none;" class="mt-3">
+            <button onclick="downloadTemplate()" class="btn btn-success">Download Template</button>
+        </div>
+
+        <div id="qrcodeSection" style="display: none;" class="mt-3">
+            <div id="qrcodeDisplay"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function showFormSearch() {
+        document.getElementById('formSearchSection').style.display = 'block';
+    }
+
+    function searchForms() {
+        const searchTerm = document.getElementById('formSearchInput').value;
+        // Make AJAX call to Flask backend
+        fetch(`/search_forms?term=${searchTerm}`)
+            .then(response => response.json())
+            .then(forms => {
+                const resultsDiv = document.getElementById('searchResults');
+                resultsDiv.innerHTML = forms.map(form => `
+                    <div class="card mt-2">
+                        <div class="card-body">
+                            <h5 class="card-title">${form.name}</h5>
+                            <button onclick="previewForm('${form.id}')" class="btn btn-info">Preview</button>
+                        </div>
+                    </div>
+                `).join('');
+            });
+    }
+
+    function previewForm(formId) {
+        // Make AJAX call to get form preview
+        fetch(`/get_form_preview/${formId}`)
+            .then(response => response.json())
+            .then(form => {
+                document.getElementById('previewContent').innerHTML = form.content;
+                document.getElementById('formPreview').style.display = 'block';
+                document.getElementById('searchResults').style.display = 'none';
+            });
+    }
+
+    function goBackToSearch() {
+        document.getElementById('formPreview').style.display = 'none';
+        document.getElementById('searchResults').style.display = 'block';
+        document.getElementById('downloadSection').style.display = 'none';
+        document.getElementById('qrcodeSection').style.display = 'none';
+        document.getElementById('actionSelect').value = '';
+    }
+
+    function handleActionChange() {
+        const action = document.getElementById('actionSelect').value;
+        document.getElementById('downloadSection').style.display = action === 'download' ? 'block' : 'none';
+        document.getElementById('qrcodeSection').style.display = action === 'qrcode' ? 'block' : 'none';
+
+        if (action === 'qrcode') {
+            generateQRCode();
+        }
+    }
+
+    function downloadTemplate() {
+        // Make AJAX call to download template
+        window.location.href = '/download_template/' + currentFormId;
+    }
+
+    function generateQRCode() {
+        // Make AJAX call to generate QR code
+        fetch(`/generate_qrcode/${currentFormId}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('qrcodeDisplay').innerHTML = `
+                    <img src="data:image/png;base64,${data.qr_code}" alt="QR Code">
+                `;
+            });
+    }
+</script>
+{% endif %}
+{% endblock %}

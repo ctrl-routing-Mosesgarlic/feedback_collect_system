@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>University Feedback System</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .form-section {
+            margin-bottom: 25px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        select, textarea, input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin-top: 5px;
+        }
+
+        .anonymous-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .rating-stars {
+            display: flex;
+            gap: 5px;
+            cursor: pointer;
+        }
+
+        .star {
+            font-size: 24px;
+            color: #ddd;
+            transition: color 0.2s;
+        }
+
+        .star:hover,
+        .star.active {
+            color: #f1c40f;
+        }
+
+        .category-questions {
+            display: none;
+        }
+
+        .visible {
+            display: block;
+        }
+
+        button {
+            background-color: var(--secondary-color);
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        .file-upload {
+            position: relative;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .file-upload input {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>University Feedback Portal</h1>
+            <p>Your voice matters! .</p>
+            <p>Please fill out this feedback and Help us improve your university experience</p>
+        </div>
+
+        <form id="feedbackForm">
+            <!-- Anonymous Toggle -->
+            <div class="anonymous-toggle">
+                <input type="checkbox" id="anonymous">
+                <label for="anonymous">Submit Anonymously</label>
+            </div>
+
+            <!-- Category Selection -->
+            <div class="form-section">
+                <div class="form-group">
+                    <label>Select Feedback Category</label>
+                    <select id="category" required>
+                        <option value="">-- Choose Category --</option>
+                        <option value="student-Council">Student Council</option>
+                        <option value="academic">Academic Experience</option>
+                        <option value="facilities">Campus Facilities</option>
+                        <option value="services">Student Services</option>
+                        <option value="safety">Safety & Wellbeing</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Dynamic Questions -->
+            <div class="form-section category-questions" id="councilQuestions">
+                <h3>Student Council</h3>
+                <div class="form-group">
+                    <label>Are you satisfied with the quality of your courses?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>How could we improve the academic workload?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+            </div>
+
+
+            <div class="form-section category-questions" id="academicQuestions">
+                <h3>Academic Experience</h3>
+                <div class="form-group">
+                    <label>Are you satisfied with the quality of your courses?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>How could we improve the academic workload?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+            </div>
+
+            <div class="form-section category-questions" id="facilitiesQuestions">
+                <h3>Campus Facilities</h3>
+                <div class="form-group">
+                    <label>How can we improve campus facilities?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Suggestions for food services:</label>
+                    <textarea rows="5"></textarea>
+                </div>
+            </div>
+
+            <div class="form-section category-questions" id="servicesQuestions">
+                <h3>Student Services</h3>
+                <div class="form-group">
+                    <label>How can we improve student services?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Are there any issues you would like to report?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+            </div>
+            
+            <div class="form-section category-questions" id="safetyQuestions">
+                <h3>Safety & Wellbeing</h3>
+                <div class="form-group">
+                    <label>How can we improve safety at the university?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Are there any safety concerns you would like to report?</label>
+                    <textarea rows="5"></textarea>
+                </div>
+            </div>
+            
+            <!-- Add similar sections for other categories -->
+
+            <!-- General Feedback -->
+            <div class="form-section">
+                <div class="form-group">
+                    <label>Your Feedback/Complaint/Suggestions</label>
+                    <textarea id="mainFeedback" rows="5" required></textarea>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <div class="form-group">
+                    <label>Your Views/Recommendations</label>
+                    <textarea id="mainFeedback" rows="5" required></textarea>
+                </div>
+            </div>
+
+            <div class="form-section" id="userInfo">
+                <div class="form-group">
+                    <label>Email (Optional)</label>
+                    <input type="email" id="email">
+                </div>
+            </div>
+
+            <!-- File Upload -->
+            <!-- Centered File Upload Section -->
+            <div class="form-section" style="display: flex; flex-direction: column; align-items: center; margin: 0 auto; text-align: center;">
+                <label>Attach File (Optional)</label>
+                <div class="file-upload" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                    <button type="button">Choose File</button>
+                    <input type="file" id="attachment">
+                </div>
+            </div>
+
+
+            <div class="Submit" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                <button type="submit">Submit Feedback</button>
+            </div>
+                
+        </form>
+    </div>
+
+    <script>
+        // Anonymous Toggle
+        const anonymousCheckbox = document.getElementById('anonymous');
+        const userInfoSection = document.getElementById('userInfo');
+
+        anonymousCheckbox.addEventListener('change', () => {
+            userInfoSection.style.display = anonymousCheckbox.checked ? 'none' : 'block';
+        });
+
+        // Category Selection
+        const categorySelect = document.getElementById('category');
+        const allQuestions = document.querySelectorAll('.category-questions');
+
+        categorySelect.addEventListener('change', () => {
+            const selectedCategory = categorySelect.value;
+            allQuestions.forEach(questions => {
+                questions.classList.remove('visible');
+                if (questions.id === `${selectedCategory}Questions`) {
+                    questions.classList.add('visible');
+                }
+            });
+        });
+
+        
+
+        // Form Submission
+        document.getElementById('feedbackForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            alert('Thank you for your feedback! Your submission has been received.');
+            e.target.reset();
+            stars.forEach(star => star.classList.remove('active'));
+            ratingValue.value = '';
+        });
+    </script>
+</body>
+</html>
+
+<div class="form-group mb-3">
+    <label for="question" class="form-label">Question</label>
+    <textarea name="question" id="question" class="form-control" rows="3" required></textarea>
+</div>
+<div class="form-group mb-3">
+    <label for="question_type" class="form-label">Question Type</label>
+    <select name="question_type" id="question_type" class="form-control" required>
+        <option value="">Select question type</option>
+        <option value="text">Text Response</option>
+        <option value="rating">Rating Scale</option>
+        <option value="multiple_choice">Multiple Choice</option>
+    </select>
+</div>
+<button type="submit" class="btn btn-primary">Add Questio</button>

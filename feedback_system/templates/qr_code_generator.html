@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced QR Code Generator</title>
+    <style>
+        /* General body styling */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* Center the container */
+        .container {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 600px;
+        }
+
+        /* Styling the header */
+        h1 {
+            text-align: center;
+            color: #007BFF;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        /* Styling the form */
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* Label styling */
+        label {
+            font-weight: bold;
+            color: #333;
+        }
+
+        /* Input and select styling */
+        input[type="text"],
+        input[type="file"],
+        input[type="color"],
+        input[type="number"],
+        select {
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            outline: none;
+            transition: border-color 0.3s;
+            background: #f9f9f9;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: #007BFF;
+        }
+
+        /* Button styling */
+        button {
+            padding: 12px;
+            font-size: 16px;
+            color: #ffffff;
+            background-color: #007BFF;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        /* Preview Section */
+        .preview-section {
+            margin-top: 20px;
+            text-align:center;
+        }
+
+        .preview-section img {
+            max-width:100%;
+            height:auto;
+        }
+    </style>
+    <script>
+        function toggleColorInputs() {
+            const fgColorType = document.querySelector('[name="fg_color_type"]').value;
+            document.getElementById('single-color').style.display = fgColorType === 'single' ? 'block' : 'none';
+            document.getElementById('gradient-colors').style.display = fgColorType === 'gradient' ? 'block' : 'none';
+            document.getElementById('eye-color').style.display = fgColorType === 'custom_eyes' ? 'block' : 'none';
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>QR Code Generator</h1>
+        <form action="/generate" method="post" enctype="multipart/form-data">
+            <label>Enter URL:</label>
+            <input type="text" name="url" placeholder="https://example.com" required>
+
+            <label>Foreground Color Type:</label>
+            <select name="fg_color_type" onchange="toggleColorInputs()">
+                <option value="single">Single Color</option>
+                <option value="gradient">Color Gradient</option>
+                <option value="custom_eyes">Custom Eye Color</option>
+            </select>
+
+            <div id="single-color" style="display: block;">
+                <label>Single Foreground Color:</label>
+                <input type="color" name="single_color" value="#000000">
+            </div>
+
+            <div id="gradient-colors" style="display: none;">
+                <label>Gradient Start Color:</label>
+                <input type="color" name="gradient_start" value="#000000">
+
+                <label>Gradient End Color:</label>
+                <input type="color" name="gradient_end" value="#FFFFFF">
+            </div>
+
+            <div id="eye-color" style="display: none;">
+                <label>Custom Eye Color:</label>
+                <input type="color" name="eye_color" value="#FF0000">
+            </div>
+
+            <label>Background Color:</label>
+            <input type="color" name="bg_color" value="#FFFFFF">
+
+            <label>QR Code Size (1-20):</label>
+            <input type="number" name="size" min="1" max="20" value="10">
+
+            <label>Upload Logo:</label>
+            <input type="file" name="logo">
+
+            <label>Image Format:</label>
+            <select name="format">
+                <option value="PNG">PNG</option>
+                <option value="JPG">JPG</option>
+                <option value="SVG">SVG</option>
+                <option value="PDF">PDF</option>
+                <option value="EPS">EPS</option>
+            </select>
+
+            <!-- Button to generate QR code -->
+            <button type="submit">Generate QR Code</button>
+
+            <!-- Preview Section -->
+            <!-- This will be populated with the generated QR code after submission -->
+            <div class="preview-section">
+                <!-- Placeholder for the QR code image -->
+                <h2>Preview</h2>
+                <!-- The image will be displayed here after generation -->
+                <!-- You can dynamically update this with JavaScript if needed -->
+                <!-- Example static image for demonstration -->
+                <!-- Replace this with dynamic content as needed -->
+                <!-- Example of how to show generated image -->
+                <!--
+                Assuming you have a way to get the generated image URL
+                e.g., after generating, you can set this src dynamically
+                -->
+                <!-- Uncomment below line when you have actual image source -->
+
+                <img id='qr-preview' src='{{ qr_image_url }}' alt='QR Code Preview'/>
+
+            </div>
+
+        </form>
+
+    </div>
+</body>
+</html>

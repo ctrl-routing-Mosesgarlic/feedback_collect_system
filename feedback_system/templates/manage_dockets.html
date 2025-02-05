@@ -1,0 +1,63 @@
+<!-- templates/manage_dockets.html -->
+{% extends "base.html" %}
+{% block title %}Manage Dockets{% endblock %}
+{% block content %}
+<div class="container mt-5">
+    <h2>Manage Dockets for Department: {{ department.name }}</h2>
+
+    <!-- Add a New Docket Form -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Add a New Docket</h4>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                {{ form.hidden_tag() }}  <!-- CSRF Token -->
+                <div class="form-group mb-3">
+                    {{ form.docket_name.label(class="form-label") }}
+                    {{ form.docket_name(class="form-control", placeholder="Enter docket name") }}
+                    {% for error in form.docket_name.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="action" value="add">
+                <div class="form-group text-center">
+                    {{ form.submit(class="btn btn-primary btn-lg") }}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Existing Dockets Table -->
+    <div class="card">
+        <div class="card-header bg-secondary text-white">
+            <h4 class="mb-0">Existing Dockets</h4>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for docket in dockets %}
+                    <tr>
+                        <td>{{ docket.name }}</td>
+                        <td>
+                            <form method="POST" style="display:inline;">
+                                {{ form.hidden_tag() }}  <!-- CSRF Token -->
+                                <input type="hidden" name="docket_id" value="{{ docket.docket_id }}">
+                                <input type="hidden" name="action" value="delete">
+                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

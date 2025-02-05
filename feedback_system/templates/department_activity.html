@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Department Activity{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <h1>Department Activity</h1>
+            <form method="POST" action="{{ url_for('department_activity') }}" onsubmit="return confirmSubmit()">
+                {{ form.hidden_tag() }} <!-- This renders the CSRF token as a hidden field -->
+
+                <div class="form-group mb-3">
+                    {{ form.activity_description.label }}
+                    {{ form.activity_description(class="form-control", rows="3") }}
+                    {% if form.activity_description.errors %}
+                        <div class="alert alert-danger custom-alert">
+                            {{ form.activity_description.errors[0] }}
+                        </div>
+                    {% endif %}
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100">
+                    {{ form.submit.label.text }}
+                </button>
+            </form>
+
+            <hr>
+
+            <h2>Recent Activities</h2>
+            <ul class="list-group">
+                {% for activity in activities %}
+                    <li class="list-group-item">{{ activity.activity_description }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<script>
+    function confirmSubmit() {
+        return confirm("Are you sure you want to submit this activity?");
+    }
+</script>
+{% endblock %}

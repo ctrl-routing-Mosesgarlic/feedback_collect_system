@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block title %}Docket Feedback Design{% endblock %}
+
+{% block extra_css %}
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f9f9f9;
+            }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            }
+
+        .form-section {
+            margin-bottom: 25px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+            }
+
+        .form-group {
+            margin-bottom: 20px;
+            }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--primary-color);
+            font-weight: 600;
+            }
+
+        select, textarea, input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin-top: 5px;
+            }
+
+        .anonymous-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            }
+
+        .rating-stars {
+            display: flex;
+            gap: 5px;
+            cursor: pointer;
+            }
+
+        .star {
+            font-size: 24px;
+            color: #ddd;
+            transition: color 0.2s;
+            }
+
+        .star:hover,
+        .star.active {
+            color: #f1c40f;
+            }
+
+        .category-questions {
+            display: none;
+            }
+
+        .visible {
+            display: block;
+            }
+
+        button {
+            background-color: var(--secondary-color);
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+            }
+
+        button:hover {
+            background-color: #2980b9;
+            }
+
+        .file-upload {
+            position: relative;
+            overflow: hidden;
+            margin-top: 10px;
+            }
+
+        .file-upload input {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+            }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="container mt-4">
+        <h2 class="mb-4">Design Docket Feedback Form</h2>
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Campaign Details</h5>
+                <p class="card-text"><strong>Title:</strong> {{ campaign.title }}</p>
+                <p class="card-text"><strong>Description:</strong> {{ campaign.description }}</p>
+            </div>
+        </div>
+    
+        <!-- Main Feedback Form -->
+        <form id="feedbackForm" method="POST" action="{{ url_for('save_docket_feedback', campaign_id=campaign.campaign_id) }}" enctype="multipart/form-data">
+            {{ form.csrf_token }}
+            
+            <!-- Docket Number -->
+            <div class="form-group mb-3">
+                <label for="docket_number" class="form-label">Docket Number</label>
+                <input type="text" name="docket_number" id="docket_number" class="form-control" required>
+            </div>
+            
+            <!-- Category Selection -->
+            <div class="form-section">
+                <div class="form-group">
+                    <label for="category">Select Feedback Category</label>
+                    <select id="category" name="category" required>
+                        <option value="">-- Choose Category --</option>
+                        <option value="student-council">Student Council</option>
+                        <option value="academic">Academic Experience</option>
+                        <option value="facilities">Campus Facilities</option>
+                        <option value="services">Student Services</option>
+                        <option value="safety">Safety & Wellbeing</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Dynamic Questions -->
+            <div class="category-questions" id="category-content">
+                <!-- Questions will be loaded dynamically based on category selection -->
+            </div>
+
+            <!-- General Feedback -->
+            <div class="form-section">
+                <div class="form-group">
+                    <label for="feedback">Your Feedback/Complaint/Suggestions</label>
+                    <textarea id="feedback" name="feedback" rows="5" required></textarea>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <div class="form-group">
+                    <label for="recommendations">Your Views/Recommendations</label>
+                    <textarea id="recommendations" name="recommendations" rows="5" required></textarea>
+                </div>
+            </div>
+
+            <!-- User Info -->
+            <div class="form-section">
+                <div class="form-group">
+                    <div class="anonymous-toggle">
+                        <input type="checkbox" id="anonymous" name="anonymous">
+                        <label for="anonymous">Submit Anonymously</label>
+                    </div>
+                </div>
+
+                <div class="form-section" id="userInfo">
+                    <div class="form-group">
+                        <label for="email">Email (Optional)</label>
+                        <input type="email" id="email" name="email">
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Upload -->
+            <div class="form-section text-center">
+                <label for="attachment">Attach File (Optional)</label>
+                <div class="file-upload">
+                    <button type="button" id="fileButton">Choose File</button>
+                    <input type="file" id="attachment" name="attachment" class="d-none">
+                    <span id="fileName" class="mt-2 d-block"></span>
+                </div>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="form-section text-center">
+                <button type="submit" class="btn btn-primary">Submit Feedback</button>
+            </div>
+        </form>
+
+        <!-- Display existing questions -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">Current Questions</h5>
+            </div>
+            <div class="card-body">
+                {% if questions %}
+                    <div class="list-group">
+                        {% for question in questions %}
+                            <div class="list-group-item">
+                                <h6 class="mb-1">{{ question.question }}</h6>
+                                <small class="text-muted">Type: {{ question.question_type }}</small>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted">No questions added yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('feedbackForm');
+    const anonymousCheckbox = document.getElementById('anonymous');
+    const userInfoSection = document.getElementById('userInfo');
+    const categorySelect = document.getElementById('category');
+    const fileButton = document.getElementById('fileButton');
+    const fileInput = document.getElementById('attachment');
+    const fileName = document.getElementById('fileName');
+
+    // Anonymous Toggle
+    anonymousCheckbox?.addEventListener('change', () => {
+        if (userInfoSection) {
+            userInfoSection.style.display = anonymousCheckbox.checked ? 'none' : 'block';
+        }
+    });
+
+    // File Upload Handling
+    fileButton?.addEventListener('click', () => {
+        fileInput.click();
+    });
+
+    fileInput?.addEventListener('change', () => {
+        fileName.textContent = fileInput.files[0]?.name || 'No file chosen';
+    });
+
+    // Category Selection
+    categorySelect?.addEventListener('change', function() {
+        const selectedCategory = this.value;
+        if (!selectedCategory) return;
+
+        // You can load questions dynamically based on category here
+        // Example AJAX call:
+        fetch(`/get_category_questions/${selectedCategory}`, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Update the questions section
+            document.getElementById('category-content').innerHTML = data.html;
+        })
+        .catch(error => console.error('Error:', error));
+    });
+
+    // Form Submission
+    form?.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(this);
+        
+        fetch(this.action, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Thank you for your feedback! Your submission has been received.');
+                form.reset();
+                fileName.textContent = '';
+            } else {
+                alert(data.error || 'An error occurred. Please try again.');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred. Please try again.');
+        });
+    });
+});
+</script>
+{% endblock %}

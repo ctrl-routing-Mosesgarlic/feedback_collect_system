@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Create Campaign{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">Create Campaign</h2>
+    
+    <div class="btn-group mb-4" role="group" aria-label="Feedback Types">
+        <a href="{{ url_for('create_campaign', feedback_type='general') }}"
+            class="btn {% if form.feedback_type.data == 'general' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+            General Feedback
+        </a>
+        <a href="{{ url_for('create_campaign', feedback_type='docket-wise') }}"
+            class="btn {% if form.feedback_type.data == 'docket-wise' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+            Docket Feedback
+        </a>
+        <a href="{{ url_for('create_campaign', feedback_type='service-wise') }}"
+            class="btn {% if form.feedback_type.data == 'service-wise' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+            Service Feedback
+        </a>
+    </div>
+
+    <form method="POST" action="{{ url_for('create_campaign') }}" id="campaignForm">
+        {{ form.csrf_token }}
+        <input type="hidden" name="feedback_type" value="{{ form.feedback_type.data }}">
+        
+        <div class="form-group mb-3">
+            {{ form.title.label(class="form-label") }}
+            {{ form.title(class="form-control", placeholder="Enter campaign title") }}
+            {% if form.title.errors %}
+                <div class="text-danger">
+                    {% for error in form.title.errors %}
+                        <small>{{ error }}</small><br>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="form-group mb-3">
+            {{ form.description.label(class="form-label") }}
+            {{ form.description(class="form-control", rows="4", placeholder="Enter campaign description") }}
+            {% if form.description.errors %}
+                <div class="text-danger">
+                    {% for error in form.description.errors %}
+                        <small>{{ error }}</small><br>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <button type="submit" class="btn btn-primary">Create Campaign</button>
+    </form>
+</div>
+
+<script>
+document.getElementById('campaignForm').addEventListener('submit', function(event) {
+    event.preventDefault();
+    const formData = new FormData(this);
+
+    fetch("{{ url_for('create_campaign') }}", {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'Accept': 'application/json',
+        },
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const feedbackType = formData.get('feedback_type');
+            const routes = {
+                'general': "{{ url_for('general_feedback', campaign_id=0) }}",
+                'docket-wise': "{{ url_for('docket_feedback', campaign_id=0) }}",
+                'service-wise': "{{ url_for('service_feedback', campaign_id=0) }}"
+            };
+            window.location.href = routes[feedbackType].replace('0', data.campaign_id);
+        } else {
+            alert(data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert("An error occurred while creating the campaign.");
+    });
+});
+</script>
+{% endblock %}

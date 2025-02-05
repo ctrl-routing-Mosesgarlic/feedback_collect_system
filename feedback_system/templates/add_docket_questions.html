@@ -1,0 +1,16 @@
+<form method="POST">
+    {{ form.csrf_token }}
+    <div class="question-group">
+        <label>Docket Selection</label>
+        {{ form.docket_choice(class="form-select") }}
+    </div>
+    
+    <div class="question-group">
+        <label>Default Docket Questions</label>
+        <textarea class="form-control" name="questions" rows="5">
+What is your feedback/idea/complaint?
+What should be brought back and why? (optional)
+        </textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Questions</button>
+</form>

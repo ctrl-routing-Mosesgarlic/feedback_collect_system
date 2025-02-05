@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organizational Feedback Form</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+
+        .form-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        select, input, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .feedback-type {
+            display: flex;
+            gap: 20px;
+        }
+
+        .conditional-field {
+            display: none;
+        }
+
+        .required::after {
+            content: "*";
+            color: red;
+            margin-left: 4px;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <h2>Organizational Feedback Form</h2>
+        <form id="feedbackForm" action="/submit-feedback" method="POST">
+            <!-- Personal Information -->
+            <div class="form-group">
+                <label class="required" for="name">Your Name:</label>
+                <input type="text" id="name" name="name" required>
+            </div>
+
+            <div class="form-group">
+                <label class="required" for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+
+            <!-- Department Selection -->
+            <div class="form-group">
+                <label class="required" for="department">Select Department:</label>
+                <select id="department" name="department" required>
+                    <option value="">-- Please Choose --</option>
+                    <option value="hr">Human Resources</option>
+                    <option value="it">Information Technology</option>
+                    <option value="finance">Finance</option>
+                    <option value="operations">Operations</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+
+            <!-- Feedback Type -->
+            <div class="form-group">
+                <label class="required">Feedback Type:</label>
+                <div class="feedback-type">
+                    <label>
+                        <input type="radio" name="feedbackType" value="docket" required>
+                        Departmental Docket
+                    </label>
+                    <label>
+                        <input type="radio" name="feedbackType" value="general">
+                        General Feedback
+                    </label>
+                    <label>
+                        <input type="radio" name="feedbackType" value="service">
+                        Service Feedback
+                    </label>
+                </div>
+            </div>
+
+            <!-- Conditional Fields -->
+            <div id="docketField" class="form-group conditional-field">
+                <label class="required" for="docketNumber">Docket Number:</label>
+                <input type="text" id="docketNumber" name="docketNumber">
+            </div>
+
+
+            <div id="generalRating" class="form-group conditional-field">
+                <label class="required" for="rating">Rating:</label>
+                <select id="rating" name="rating">
+                    <option value="">-- Rate Department --</option>
+                    <option value="5">Excellent</option>
+                    <option value="4">Very Good</option>
+                    <option value="3">Good</option>
+                    <option value="2">Fair</option>
+                    <option value="1">Poor</option>
+                </select>
+            </div>
+            <div id="serviceRating" class="form-group conditional-field">
+                <label class="required" for="rating">Service Rating:</label>
+                <select id="rating" name="rating">
+                    <option value="">-- Rate Service --</option>
+                    <option value="5">Excellent</option>
+                    <option value="4">Very Good</option>
+                    <option value="3">Good</option>
+                    <option value="2">Fair</option>
+                    <option value="1">Poor</option>
+                </select>
+            </div>
+            <!-- Rating System -->
+            <div class="form-section">
+                <label>Overall University Rating (Optional)</label>
+                <div class="rating-stars">
+                    <span class="star" data-value="1">★</span>
+                    <span class="star" data-value="2">★</span>
+                    <span class="star" data-value="3">★</span>
+                    <span class="star" data-value="4">★</span>
+                    <span class="star" data-value="5">★</span>
+                </div>
+                <input type="hidden" id="ratingValue">
+            </div>
+
+            <!-- Feedback Content -->
+            <div class="form-group">
+                <label class="required" for="message">Feedback Message:</label>
+                <textarea id="message" name="message" rows="5" required></textarea>
+            </div>
+
+            <button type="submit">Submit Feedback</button>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const feedbackTypeRadios = document.querySelectorAll('input[name="feedbackType"]');
+            const docketField = document.getElementById('docketField');
+            const serviceRating = document.getElementById('serviceRating');
+            // Star Rating
+        const stars = document.querySelectorAll('.star');
+        const ratingValue = document.getElementById('ratingValue');
+
+        stars.forEach(star => {
+            star.addEventListener('click', () => {
+                const value = parseInt(star.dataset.value);
+                ratingValue.value = value;
+                stars.forEach((s, index) => {
+                    s.classList.toggle('active', index < value);
+                });
+            });
+        });
+
+            feedbackTypeRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    docketField.style.display = this.value === 'docket' ? 'block' : 'none';
+                    serviceRating.style.display = this.value === 'service' ? 'block' : 'none';
+                    
+                    // Update required attributes
+                    document.getElementById('docketNumber').required = this.value === 'docket';
+                    document.getElementById('rating').required = this.value === 'service';
+                });
+            });
+        });
+    </script>
+</body>
+</html>

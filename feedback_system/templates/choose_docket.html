@@ -1,0 +1,111 @@
+<!-- templates/docket_feed.html -->
+{% extends "base.html" %}
+{% block title %}Department Dockets{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Current Department Dockets</h2>
+    
+    <!-- Search and Filter Section -->
+    <div class="mb-4">
+        <div class="row">
+            <div class="col-md-6">
+                <input type="text" class="form-control" id="docketSearch" 
+                    placeholder="Search dockets...">
+            </div>
+            <div class="col-md-3">
+                <select class="form-control" id="statusFilter">
+                    <option value="">All Statuses</option>
+                    <option value="active">Active</option>
+                    <option value="pending">Pending</option>
+                    <option value="completed">Completed</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Docket List -->
+    <div class="docket-feed">
+        {% if dockets %}
+            {% for docket in dockets %}
+            <div class="card mb-3 docket-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="card-title">{{ docket.name }}</h5>
+                        <span class="badge {% if docket.status == 'active' %}bg-success
+                                        {% elif docket.status == 'pending' %}bg-warning
+                                        {% else %}bg-secondary{% endif %}">
+                            {{ docket.status }}
+                        </span>
+                    </div>
+                    <div class="card-text">
+                        <p><strong>ID:</strong> {{ docket.id }}</p>
+                        <p><strong>Created:</strong> {{ docket.created_at|datetime }}</p>
+                        <p><strong>Department:</strong> {{ docket.department }}</p>
+                        <p><strong>Description:</strong> {{ docket.description }}</p>
+                    </div>
+                    <div class="mt-3">
+                        <form method="POST" action="{{ url_for('add_questions', campaign_id=campaign.campaign_id) }}" 
+                            class="d-inline">
+                            {{ form.csrf_token }}
+                            <input type="hidden" name="docket_id" value="{{ docket.id }}">
+                            <button type="submit" class="btn btn-primary btn-sm">Select for Feedback</button>
+                        </form>
+                        <a href="{{ url_for('view_docket', docket_id=docket.id) }}" 
+                            class="btn btn-info btn-sm">View Details</a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-info">
+                No dockets found for the current department session.
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Pagination -->
+    {% if pagination %}
+    <nav aria-label="Docket pagination" class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% for page in pagination.iter_pages() %}
+                {% if page %}
+                    <li class="page-item {% if page == pagination.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('docket_feed', page=page) }}">{{ page }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+            {% endfor %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+
+<!-- JavaScript for search and filter functionality -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('docketSearch');
+    const statusFilter = document.getElementById('statusFilter');
+    const docketCards = document.querySelectorAll('.docket-card');
+
+    function filterDockets() {
+        const searchTerm = searchInput.value.toLowerCase();
+        const statusTerm = statusFilter.value.toLowerCase();
+
+        docketCards.forEach(card => {
+            const cardText = card.textContent.toLowerCase();
+            const cardStatus = card.querySelector('.badge').textContent.toLowerCase();
+            
+            const matchesSearch = cardText.includes(searchTerm);
+            const matchesStatus = statusTerm === '' || cardStatus.includes(statusTerm);
+
+            card.style.display = matchesSearch && matchesStatus ? 'block' : 'none';
+        });
+    }
+
+    searchInput.addEventListener('input', filterDockets);
+    statusFilter.addEventListener('change', filterDockets);
+});
+</script>
+{% endblock %}
