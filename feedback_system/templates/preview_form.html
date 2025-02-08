@@ -1,0 +1,113 @@
+<!-- preview_form.html -->
+{% extends "base.html" %}
+{% block content %}
+<div class="container preview-form mt-4">
+    <div class="form-header">
+        <h2>{{ campaign.title }}</h2>
+        <p class="description">{{ campaign.description }}</p>
+    </div>
+
+    <form id="feedback-form">
+        {% for question in questions %}
+        <div class="form-group">
+            <label>{{ question.question_text }}</label>
+            <textarea class="form-control" rows="3" disabled></textarea>
+        </div>
+        {% endfor %}
+    </form>
+
+    <div class="form-actions">
+        <button class="btn btn-warning" onclick="editForm()">Edit Form</button>
+        <button class="btn btn-success" onclick="confirmForm()">Confirm & Save</button>
+    </div>
+</div>
+
+<script>
+function editForm() {
+    window.location.href = `/edit_form/{{ campaign.campaign_id }}`;
+}
+
+function confirmForm() {
+    const formName = prompt("Please enter a name for this form:");
+    if (formName) {
+        fetch(`/save_form/{{ campaign.campaign_id }}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({ form_name: formName })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showQRCodeAndDownload(data.qr_code, data.form_url);
+            }
+        });
+    }
+}
+
+function showQRCodeAndDownload(qrCode, formUrl) {
+    const modal = document.createElement('div');
+    modal.innerHTML = `
+        <div class="modal fade" id="qrCodeModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Form Created Successfully</h5>
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <img src="data:image/png;base64,${qrCode}" alt="QR Code" id="qrCodeImage">
+                        <p class="mt-3">Form URL: <a href="${formUrl}" target="_blank">${formUrl}</a></p>
+                        <div class="btn-group mt-3">
+                            <button onclick="downloadQRCode()" class="btn btn-primary">Download QR Code</button>
+                            <button onclick="shareForm('${formUrl}')" class="btn btn-info">Share Form</button>
+                            <button onclick="printQRCode()" class="btn btn-secondary">Print QR Code</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    $('#qrCodeModal').modal('show');
+}
+
+function downloadQRCode() {
+    const img = document.getElementById('qrCodeImage');
+    const link = document.createElement('a');
+    link.download = 'form-qr-code.png';
+    link.href = img.src;
+    link.click();
+}
+
+function shareForm(formUrl) {
+    if (navigator.share) {
+        navigator.share({
+            title: 'Feedback Form',
+            url: formUrl
+        });
+    } else {
+        navigator.clipboard.writeText(formUrl)
+            .then(() => alert('Form URL copied to clipboard!'));
+    }
+}
+
+function printQRCode() {
+    const printWindow = window.open('', '_blank');
+    const img = document.getElementById('qrCodeImage');
+    printWindow.document.write(`
+        <html>
+            <head><title>Form QR Code</title></head>
+            <body style="text-align: center; padding: 20px;">
+                <img src="${img.src}" style="max-width: 300px;">
+                <p>Scan this QR code to access the feedback form</p>
+            </body>
+        </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+}
+</script>
+{% endblock %}

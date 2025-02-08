@@ -1,0 +1,80 @@
+<!-- edit_form.html -->
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Edit Form</h2>
+    
+    <form id="editFormDetails" class="mb-4">
+        {{ form.csrf_token }}
+        <div class="form-group">
+            <label>Form Name</label>
+            <input type="text" class="form-control" id="formName" value="{{ form.name }}">
+        </div>
+        
+        <div class="logo-upload">
+            <label>Upload Logo</label>
+            <input type="file" class="form-control" id="logoFile" accept="image/*">
+            {% if form.logo_path %}
+            <img src="{{ url_for('static', filename=form.logo_path) }}" class="mt-2" style="max-height: 100px;">
+            {% endif %}
+        </div>
+    </form>
+
+    <div id="questions-container">
+        {% for question in questions %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="form-group">
+                    <label>Question {{ loop.index }}</label>
+                    <textarea class="form-control question-text" data-id="{{ question.question_id }}">{{ question.question_text }}</textarea>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="d-flex justify-content-between mt-4">
+        <button class="btn btn-secondary" onclick="cancelEdit()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveChanges()">Save Changes</button>
+    </div>
+</div>
+
+<script>
+function saveChanges() {
+    const formData = new FormData();
+    formData.append('form_name', document.getElementById('formName').value);
+    
+    const logoFile = document.getElementById('logoFile').files[0];
+    if (logoFile) {
+        formData.append('logo', logoFile);
+    }
+
+    const questions = [];
+    document.querySelectorAll('.question-text').forEach(textarea => {
+        questions.push({
+            id: textarea.dataset.id,
+            text: textarea.value
+        });
+    });
+    formData.append('questions', JSON.stringify(questions));
+
+    fetch(`/edit_form/{{ form.form_id }}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = `/preview_form/{{ form.campaign_id }}`;
+        }
+    });
+}
+
+function cancelEdit() {
+    window.location.href = `/preview_form/{{ form.campaign_id }}`;
+}
+</script>
+{% endblock %}

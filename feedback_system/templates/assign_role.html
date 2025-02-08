@@ -3,7 +3,7 @@
 {% block title %}Assign Roles{% endblock %}
 {% block content %}
 <div class="container mt-5">
-    <h2 class="text-center mb-4">Assign Roles</h2>
+    <h2 class="text-center mb-4" style="background-color: lightblue;">Assign Roles</h2>
 
 <form method="POST" action="{{ url_for('assign_role') }}" class="bg-light p-4 rounded shadow">
     {{ form.hidden_tag() }}  <!-- This includes the CSRF token -->
