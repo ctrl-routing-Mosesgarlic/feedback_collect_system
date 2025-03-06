@@ -4,13 +4,22 @@ from flask import Flask
 from sqlalchemy.orm.exc import NoResultFound
 from flask_login import current_user, login_required,LoginManager,UserMixin, AnonymousUserMixin
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import sessionmaker
 from flask_bcrypt import Bcrypt
 from config import Config
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from flask import abort, current_app
 import datetime
+from sqlalchemy import desc
 import logging, re
+from sqlalchemy import text
+import traceback
+import io
+import requests
+from time import sleep
+from werkzeug.exceptions import HTTPException
+import uuid
 
 from sqlalchemy.sql import func
 import re
@@ -25,11 +34,12 @@ from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFProtect,generate_csrf
 from sqlalchemy.exc import IntegrityError
 import secrets
+import base64
 from sqlalchemy.exc import SQLAlchemyError
 
 from flask import redirect
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SubmitField, SelectField, TextAreaField, RadioField, HiddenField, DateTimeField, BooleanField, FileField
+from wtforms import StringField, PasswordField, SubmitField, SelectField, TextAreaField, RadioField, HiddenField, DateTimeField, BooleanField, FileField, FieldList, FormField
 from wtforms.validators import DataRequired, Email, EqualTo, Length, AnyOf, Optional , ValidationError
 from flask_wtf.file import FileAllowed
 from werkzeug.utils import secure_filename
@@ -42,22 +52,27 @@ from PIL import Image, ImageDraw
 from flask import Flask, request, send_file
 from io import BytesIO
 
+import logging
+
+# Set up your logger
+logger = logging.getLogger(__name__)
+
 
 
 
 # import routes  # Import routes (we’ll create this later)
-from models import Campaign, Feedback, Department ,Users, Question, Dockets, Announcement, DepartmentActivity, FeedbackQuestion
-# from models import *
-# with app.app_context():            #import app and db from your app package
-#     db.create_all()                #create the tables based on models
+from models import Campaign, Feedback, Department ,Users, Question, Dockets, Announcement, DepartmentActivity,FormFeedback, FormUrl, ViewerDepartment
+
+from forms import QuestionForm,LoginForm, RegisterForm, AddDepartmentForm, AddDocketForm, AssignRoleForm, CreateCampaignForm, DepartmentActivityForm, AddAnnouncementForm ,DepartmentActivityViewForm , AnnouncementViewForm , FeedbackViewForm
 
 
+
+# Initialize extensions first (before app creation)
 
 
 app = Flask(__name__)
 app.config.from_object(Config)
 db = SQLAlchemy(app)
-bcrypt = Bcrypt(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://username:password@localhost/your_database'
 app.config['SECRET_KEY'] = 'your_secret_key'
 # Set up Redis storage for Flask-Limiter
@@ -74,7 +89,7 @@ csrf = CSRFProtect(app)
 # Initialize Limiter with correct parameters
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=["1000 per day"],
+    default_limits=["10000 per day"],
     storage_uri=app.config["RATELIMIT_STORAGE_URL"],
     app=app,  # Pass app as a keyword argument
     
@@ -83,9 +98,11 @@ limiter = Limiter(
 # Initialize Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
+login_manager.login_view = 'login'
 
 # User class
 class User(UserMixin):
+    # department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=True)
     def __init__(self, id):
         self.id = id
 
@@ -94,7 +111,7 @@ class User(UserMixin):
 def load_user(user_id):
     return User(user_id)
 
-# Initialize Talisman with Content Security Policy
+#Initialize Talisman with Content Security Policy
 # talisman = Talisman(app,
 #     content_security_policy={
 #         'default-src': '\'self\'',
@@ -102,9 +119,35 @@ def load_user(user_id):
 #     }
 # )
 
+# Custom error handler for all exceptions
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log the error
+    logger.error(f"Error occurred: {str(e)}")
+
+    # If it's an HTTP exception, use its error code and description
+    if isinstance(e, HTTPException):
+        response = {
+            'error': True,
+            'message': e.description,
+            'status_code': e.code
+        }
+        return jsonify(response), e.code
+
+    # For other exceptions, return 500 Internal Server Error
+    response = {
+        'error': True,
+        'message': 'An unexpected error occurred. Please try again later.',
+        'status_code': 500
+    }
+    return jsonify(response), 500
+
+
+    return app
+
 if __name__== '__main__':
     app.run(debug=True, port=5000)
-    
+
 # Import models here (User, Department, Campaign, Feedback, etc.)
 # from models import User, Department, Campaign, Feedback
 
@@ -130,156 +173,50 @@ def role_required(role):
         return decorated_function
     return wrapper
 
-class SearchForm:
-    def __init__(self):
-        self.csrf_token = generate_csrf()
+# Utility function for role-based access control
+def role_required(role):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'email' not in session:
+                return redirect(url_for('login'))
+            user = db.session.execute(
+                db.select(Users).filter_by(email=session['email'])
+            ).scalar_one()
+            if not user or user.role != role:
+                return jsonify({'error': 'Unauthorized'}), 403
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
 
-class RegisterForm(FlaskForm):
-    name = StringField('Full Name', validators=[DataRequired()])
-    email = StringField('Strathmore Email', validators=[DataRequired(), Email()])
-    password = PasswordField('Password', validators=[
-        DataRequired(),
-        Length(min=12, message="Password must be at least 12 characters long"),
-    ])
-    confirm_password = PasswordField('Confirm Password', validators=[
-        DataRequired(),
-        EqualTo('password', message="Passwords must match"),
-    ])
-    submit = SubmitField('Register')
+# Custom decorator for super_admin role
+def super_admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check if user is logged in and has super_admin role
+        if 'email' not in session:
+            flash("Please log in first.", "error")
+            return redirect(url_for('login'))
+            
+        user = db.session.execute(
+            db.select(Users).filter_by(email=session['email'])
+        ).scalar_one_or_none()
+        
+        if not user or user.role != 'super_admin':
+            flash("You don't have permission to access this page.", "error")
+            return redirect(url_for('dashboard'))
+            
+        return f(*args, **kwargs)
+    return decorated_function
 
-    def validate_email(self, email):
-        if not Users.validate_strathmore_email(email.data):
-            raise ValidationError("Please use a valid Strathmore email address.")
+# class SearchForm:
+#     def __init__(self):
+#         self.csrf_token = generate_csrf()
 
-class LoginForm(FlaskForm):
-    email = StringField(
-        'Strathmore Email', validators=[DataRequired(message="Strathmore Email is required."),
-            Email(message="Please enter a valid Strathmore email address."),
-            Length(max=120, message="Email must be less than 120 characters.")
-        ],
-        # render_kw={"placeholder": "Enter your email"}  # Optional: Adds a placeholder to the email input field
-    )
-    password = PasswordField(
-        'Password',
-        validators=[
-            DataRequired(message="Password is required."),
-            Length(min=12, message="Password must be at least 12 characters long.")
-        ],
-        # render_kw={"placeholder": "Enter your password"}  # Optional: Adds a placeholder to the password input field
-    )
-    submit = SubmitField('Login')
-    
-class AssignRoleForm(FlaskForm):
-    email = StringField(
-        'Email',
-        validators=[
-            DataRequired(message="Email is required."),
-            Email(message="Please enter a valid email address."),
-            Length(max=120, message="Email must be less than 120 characters.")
-        ]
-    )
-    role = SelectField(
-        'Role',
-        choices=[
-        ('viewer', 'Viewer'), ('admin', 'Admin'), ('super_admin', 'Super Admin')],  # Add other roles as needed
-        validators=[DataRequired(message="Role is required.")]
-    )
-    submit = SubmitField('Assign Role')
-    
-class AddDepartmentForm(FlaskForm):
-    name = StringField(
-        'Department Name',
-        validators=[
-            DataRequired(message="Department name is required."),
-            Length(max=100, message="Department name must be less than 100 characters.")
-        ],
-        render_kw={"placeholder": "Enter department name"}
-    )
-    admin_id = SelectField(
-        'Assign Admin',
-        coerce=int,  # Ensure the selected value is treated as an integer
-        validators=[DataRequired(message="Please select an admin.")]
-    )
-    submit = SubmitField('Add Department')
-    
-class AddDocketForm(FlaskForm):
-    docket_name = StringField(
-        'Docket Name',
-        validators=[
-            DataRequired(message="Docket name is required."),
-            Length(max=100, message="Docket name must be less than 100 characters.")
-        ],
-        render_kw={"placeholder": "Enter docket name"}
-    )
-    submit = SubmitField('Add Docket')
-    
-class AddAnnouncementForm(FlaskForm):
-    title = StringField(
-        'Title',
-        validators=[
-            DataRequired(message="Title is required."),
-            Length(max=100, message="Title must be less than 100 characters.")
-        ],
-        render_kw={"placeholder": "Enter announcement title"}
-    )
-    content = TextAreaField(
-        'Content',
-        validators=[
-            DataRequired(message="Content is required."),
-            Length(max=500, message="Content must be less than 500 characters.")
-        ],
-        render_kw={"placeholder": "Enter announcement content", "rows": 5}
-    )
-    submit = SubmitField('Add Announcement')
-    
-    
-class CreateCampaignForm(FlaskForm):
-    title = StringField(
-        'Campaign Title',
-        validators=[
-            DataRequired(message="Campaign title is required."),
-            Length(max=100, message="Campaign title must be less than 100 characters.")
-        ],
-        render_kw={"placeholder": "Enter campaign title"}
-    )
-    description = TextAreaField(
-        'Description',
-        validators=[
-            DataRequired(message="Description is required."),
-            Length(max=500, message="Description must be less than 500 characters.")
-        ],
-        render_kw={"placeholder": "Enter campaign description", "rows": 5}
-    )
-    feedback_type = SelectField(
-        'Feedback Type',
-        choices=[
-            ('general', 'General'),
-            ('docket-wise', 'Docket-wise'),
-            ('service-wise', 'Service-wise')
-        ],
-        validators=[DataRequired(message="Feedback type is required.")]
-    )
-    submit = SubmitField('Create Campaign')
-    
+#     def validate_csrf_token(self, field):
+#         if not verify_csrf_token(field.data, current_app.config['SECRET_KEY']):
+#             raise ValidationError('Invalid CSRF token.')
 
-class DepartmentActivityForm(FlaskForm):
-    activity_description = TextAreaField(
-        'Activity Description',
-        validators=[
-            DataRequired(message="Activity description is required."),
-            Length(max=500, message="Description must be less than 500 characters.")
-        ]
-    )
-    submit = SubmitField('Add Activity')
-    
-class CreateCampaignForm(FlaskForm):
-    title = StringField('Title', validators=[DataRequired(), Length(min=1, max=100)])
-    description = TextAreaField('Description', validators=[DataRequired(), Length(min=1, max=500)])
-    feedback_type = HiddenField('Feedback Type', validators=[
-        DataRequired(),
-        AnyOf(['general', 'docket-wise', 'service-wise'], message='Invalid feedback type')
-    ])
-    
 class AddQuestionForm(FlaskForm):
     # For docket-specific choices
     docket_choice = RadioField(
@@ -388,6 +325,17 @@ def handle_file_upload(file):
         return unique_filename
     return None
 
+
+class QuestionEntryForm(FlaskForm):
+    question_text = TextAreaField('Question', validators=[
+        DataRequired(message="Question text is required"),
+        Length(min=10, max=500, message="Question must be between 10 and 500 characters")
+    ])
+    question_type = HiddenField(default='general')
+
+class GeneralQuestionsForm(FlaskForm):
+    questions = FieldList(FormField(QuestionEntryForm), min_entries=1)
+
 class DocketFeedbackForm(FlaskForm):
     """
     Form for docket-wise feedback questions.
@@ -474,18 +422,12 @@ class SearchForm(FlaskForm):
 
 @app.route('/assign_role', methods=['GET', 'POST'])
 @login_required
+@super_admin_required
 @role_required('super_admin')
 def assign_role():
-    # # Check if the user is authenticated and has the 'role' attribute
-    # if not current_user.is_authenticated:
-    #     flash("Please log in to access this page.", "danger")
-    #     return redirect(url_for('login'))  # Redirect to the login page
-    
-    # # Check if current user is super_admin
-    # if current_user.role != 'super_admin':
-    #     flash("Only super administrators can assign roles.", "danger")
-    #     return redirect(url_for('index'))
-    
+    """
+    This view handles assigning roles to users.
+    """
     form = AssignRoleForm()
     
     
@@ -518,16 +460,19 @@ def assign_role():
             flash(str(e), "danger")
         return redirect(url_for('assign_role'))
     
-    # Get all users for display
+    # Get all users for displayquestion
     users = Users.query.all()
-    return render_template('assign_role.html' , users=users, form=form)
+    return render_template('super_admins/assign_role.html' , users=users, form=form)
 
 
 @app.route('/add_department', methods=['GET', 'POST'])
 @login_required
 @role_required('super_admin')
 def add_department():
-    form = AddDepartmentForm()
+    # Get a list of eligible admin users to assign
+    eligible_admins = db.session.execute(db.select(Users).filter_by(role='admin')).scalars().all() #Users.query.filter_by(role='admin').all()
+    form = AddDepartmentForm(admins=eligible_admins)
+    
     
     # Populate the admin_id dropdown with eligible admins
     form.admin_id.choices = [(admin.user_id, admin.name) for admin in Users.query.filter_by(role='admin').all()]
@@ -539,6 +484,7 @@ def add_department():
     if form.validate_on_submit():
         name = form.name.data.strip()
         admin_id = form.admin_id.data
+        max_admins = int(request.form.get('max_admins', 1))
         
         # Check if the department name already exists
         
@@ -557,7 +503,7 @@ def add_department():
         
         #Create the new department
         try:
-            new_department = Department(name=name, created_at=datetime.now())
+            new_department = Department(name=name,max_admins=max_admins, created_at=datetime.now())
             db.session.add(new_department)
             db.session.commit()
         except Exception as e:
@@ -565,13 +511,13 @@ def add_department():
             print(f"Insertion error: {e}")
             flash("Failed to create new department")
 
-        #Assign the selected admin to the new department
-        try:
-            admin_user.department_id = new_department.department_id
-            db.session.commit()
-        except Exception as e:
-            print(f"Update error: {e}")
-            flash("Failed to assign admin user to a department")
+        # #Assign the selected admin to the new department
+        # try:
+        #     admin_user.department_id = new_department.department_id
+        #     db.session.commit()
+        # except Exception as e:
+        #     print(f"Update error: {e}")
+        #     flash("Failed to assign admin user to a department")
         
         flash(f"Department '{name}' added and assigned to {admin_user.name}.", "success")
         return redirect(url_for('add_department'))
@@ -583,7 +529,54 @@ def add_department():
     # Query all active departments (excluding soft-deleted ones)
     departments = Department.query.filter(Department.deleted_at.is_(None)).all()
     
-    return render_template('manage_departments.html', eligible_admins=eligible_admins, departments=departments , form=form)
+    return render_template('super_admins/manage_departments.html', eligible_admins=eligible_admins, departments=departments , form=form)
+
+# Route for Updating a Department
+@app.route('/update_department/<int:department_id>', methods=['POST'])
+@login_required
+@super_admin_required
+def update_department(department_id):
+    department = db.session.execute(
+        db.select(Department).filter_by(department_id=department_id)
+    ).scalar_one_or_none()
+    
+    if not department:
+        flash("Department not found", "error")
+        return redirect(url_for('add_department'))
+        
+    department_name = request.form.get('department_name')
+    max_admins = int(request.form.get('max_admins', 1))
+    
+    # Validate input
+    if not department_name:
+        flash("Department name is required", "error")
+        return redirect(url_for('add_department'))
+        
+    if max_admins < 1:
+        flash("Maximum admins must be at least 1", "error")
+        return redirect(url_for('add_department'))
+    
+    # Check current admin count
+    admin_count = db.session.execute(
+        db.select(db.func.count()).select_from(Users).filter_by(
+            department_id=department_id, role='admin')
+    ).scalar_one()
+    
+    if admin_count > max_admins:
+        flash(f"Cannot reduce max admins to {max_admins}, department currently has {admin_count} admins", "error")
+        return redirect(url_for('add_department'))
+    
+    # Update department
+    try:
+        department.name = department_name
+        department.max_admins = max_admins
+        db.session.commit()
+        flash(f"Department '{department_name}' updated successfully", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error updating department: {str(e)}", "error")
+        
+    return redirect(url_for('add_department'))
 
 
 
@@ -597,9 +590,19 @@ def delete_department(department_id):
     # Fetch the department by its ID
     department = db.session.execute(db.select(Department).filter_by(department_id=department_id)).scalar_one_or_none()  # Use scalar_one_or_none() to handle cases where the department might not exist
 
-
-    # name = request.form['name'].strip()
-    # department = db.session.execute(db.select(Department)).scalar_one()
+    
+    if not department:
+        flash("Department not found", "error")
+        return redirect(url_for('add_department'))
+    
+    # Check if department has users
+    user_count = db.session.execute(
+        db.select(db.func.count()).select_from(Users).filter_by(department_id=department_id)
+    ).scalar_one()
+    
+    if user_count > 0:
+        flash(f"Cannot delete department '{department.name}' as it has {user_count} users assigned", "error")
+        return redirect(url_for('add_department'))
 
     if department:
         print(f"Found department: {department.name}")  # Debugging
@@ -620,6 +623,146 @@ def delete_department(department_id):
     # flash(f"Department '{department.name}' deleted.", "success")
     return redirect(url_for('add_department'))
 
+# Route for Assigning Users to Departments
+@app.route('/assign_department', methods=['POST'])
+@login_required
+@super_admin_required
+def assign_department():
+    user_id = request.form.get('user_id')
+    department_id = request.form.get('department_id') or None
+    
+    if not user_id:
+        flash("User ID is required", "error")
+        return redirect(url_for('super_admin_dashboard'))
+        
+    # Get user
+    user = db.session.execute(
+        db.select(Users).filter_by(id=user_id)
+    ).scalar_one_or_none()
+    
+    if not user:
+        flash("User not found", "error")
+        return redirect(url_for('super_admin_dashboard'))
+    
+    # If assigning to department and user is admin, check max_admins limit
+    if department_id and user.role == 'admin':
+        department = db.session.execute(
+            db.select(Department).filter_by(department_id=department_id)
+        ).scalar_one_or_none()
+        
+        if department:
+            # Count current admins in this department
+            admin_count = db.session.execute(
+                db.select(db.func.count()).select_from(Users).filter_by(
+                    department_id=department_id, role='admin')
+            ).scalar_one()
+            
+            if admin_count >= department.max_admins:
+                flash(f"Department '{department.name}' already has maximum number of admins ({department.max_admins})", "error")
+                return redirect(url_for('super_admin_dashboard'))
+    
+    # Update user department
+    try:
+        user.department_id = department_id
+        db.session.commit()
+        
+        if department_id:
+            department_name = db.session.execute(
+                db.select(Department).filter_by(department_id=department_id)
+            ).scalar_one().name
+            flash(f"User {user.username} assigned to department: {department_name}", "success")
+        else:
+            flash(f"User {user.username} removed from department", "success")
+            
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error assigning department: {str(e)}", "error")
+        
+    return redirect(url_for('super_admin_dashboard'))
+
+# Route for Viewing All Campaigns
+@app.route('/view_all_campaigns')
+@login_required
+@super_admin_required
+def view_all_campaigns():
+    # Get all campaigns with department information
+    campaigns = db.session.execute(
+        db.select(Campaign, Department)
+        .join(Department, Campaign.department_id == Department.department_id)
+    ).all()
+    
+    return render_template('view_all_campaigns.html', campaigns=campaigns)
+
+# Route for Assigning Viewers to Departments
+@app.route('/assign_viewers', methods=['GET', 'POST'])
+@login_required
+@super_admin_required
+def assign_viewers():
+    if request.method == 'POST':
+        user_id = request.form.get('user_id')
+        department_ids = request.form.getlist('department_ids')
+        
+        if not user_id:
+            flash("User ID is required", "error")
+            return redirect(url_for('assign_viewers'))
+            
+        # Get user
+        user = db.session.execute(
+            db.select(Users).filter_by(user_id=user_id)
+        ).scalar_one_or_none()
+        
+        if not user:
+            flash("User not found", "error")
+            return redirect(url_for('assign_viewers'))
+            
+        # Ensure user is a viewer
+        if user.role != 'viewer':
+            user.role = 'viewer'
+        
+        # Update user's viewable departments
+        try:
+            # First remove existing assignments
+            db.session.execute(
+                db.delete(ViewerDepartment).where(ViewerDepartment.user_id == user_id)
+            )
+            
+            # Add new assignments
+            for dept_id in department_ids:
+                viewer_dept = ViewerDepartment(
+                    user_id=user_id,
+                    department_id=dept_id
+                )
+                db.session.add(viewer_dept)
+                
+            db.session.commit()
+            flash(f"Viewer permissions updated for {user.username}", "success")
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Error updating viewer permissions: {str(e)}", "error")
+            
+        return redirect(url_for('assign_viewers'))
+    
+    # GET request - display all users and departments
+    users = db.session.execute(
+        db.select(Users).filter(Users.role == 'viewer')
+    ).scalars().all()
+    
+    departments = db.session.execute(db.select(Department)).scalars().all()
+    
+    # Get current viewer assignments for each user
+    viewer_assignments = {}
+    for user in users:
+        viewer_depts = db.session.execute(
+            db.select(ViewerDepartment).filter_by(user_id=user.id)
+        ).scalars().all()
+        viewer_assignments[user.id] = [vd.department_id for vd in viewer_depts]
+    
+    return render_template('super_admins/assign_viewers.html',
+                        users=users,
+                        departments=departments,
+                        viewer_assignments=viewer_assignments)
+
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -635,7 +778,7 @@ def register():
         # Validate passwords match
         if password != confirm_password:
             flash("Passwords do not match.", "danger")
-            return render_template('register.html' , form=form)
+            return render_template('basics/register.html' , form=form)
 
         # Validate email domain
         if not email.endswith('@strathmore.edu'):
@@ -650,7 +793,7 @@ def register():
         
         if not Users.validate_password_strength(password):
             flash("Password does not meet strength requirements. It must be at least 12 characters long and include uppercase, lowercase, number, and special character.", "danger")
-            return render_template('register.html', form = form)
+            return render_template('basics/register.html', form = form)
 
         # Create new user
         try:
@@ -681,7 +824,7 @@ def register():
             flash("Registration failed. Please try again.", "danger")
             return redirect(url_for('register'))
         
-    return render_template('register.html' , form=form)
+    return render_template('basics/register.html' , form=form)
 
 @app.route('/verify-email/<token>')
 def verify_email(token):
@@ -727,7 +870,7 @@ def login():
                 elif user.role == 'admin':
                     return redirect(url_for('admin_dashboard'))  # Admin dashboard
                 else:
-                    return redirect(url_for('dashboard'))  # Viewer route
+                    return redirect(url_for('viewer_dashboard'))  # Viewer route
             else:
                 flash("Invalid email or password", "danger")
         except Exception as e:
@@ -736,7 +879,7 @@ def login():
             flash("Login failed. Please try again.", "danger")
             return redirect(url_for('login'))
         
-    return render_template('login.html' , form=form)
+    return render_template('basics/login.html' , form=form)
 
 def send_verification_email(to_email, token):
     """
@@ -852,14 +995,13 @@ class Users(db.Model):
         return check_password_hash(self.password, password)
     
 # Security-related fields
-    email_verified = db.Column(db.Boolean, default=False)
     
     # created_at = db.Column(db.DateTime, server_default=func.now())
     # updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
     # deleted_at = db.Column(db.DateTime, nullable=True)
 
-    @classmethod
-    def validate_strathmore_email(cls, email):
+    @staticmethod
+    def validate_strathmore_email(email):
         """
         Validate Strathmore email with comprehensive checks
         """
@@ -980,557 +1122,851 @@ class Department(db.Model):
 
 
     def soft_delete(self):
-        self.deleted_at = datetime.datetime.now()
+        self.deleted_at = datetime.now()
         db.session.commit()
-
+        
+        
+    def restore(self):
+        self.deleted_at = None
+        db.session.commit()
+        
+    def __repr__(self):
+        return f"<Department {self.name}>"
+    
 @app.route('/create_campaign', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def create_campaign():
+    # Create form instance
     form = CreateCampaignForm()
     
-    # Handle GET request with feedback_type parameter
-    if request.method == 'GET':
-        feedback_type = request.args.get('feedback_type')
-        if feedback_type in ['general', 'docket-wise', 'service-wise']:
-            form.feedback_type.data = feedback_type
-    
-    # Handle POST request
-    if request.method == 'POST' and form.validate_on_submit():
-        try:
-            # Get current user and verify department
-            current_user = db.session.execute(
-                db.select(Users).filter_by(email=session['email'])
-            ).scalar_one()
-            
-            if not hasattr(current_user, 'department_id') or current_user.department_id is None:
-                return jsonify({
-                    'success': False,
-                    'message': "Your account is not associated with any department."
-                })
+    try:
+        # Explicitly query for the current user
+        user = db.session.execute(
+            db.select(Users).filter_by(email=session['email'])
+        ).scalar_one_or_none()
+        
+        # Get user from database instead of using current_user
+        if 'email' not in session:
+            flash("Session expired. Please log in again.", "error")
+            return redirect(url_for('login'))
+        
+        if not user:
+            flash("User account not found. Please log in again.", "error")
+            return redirect(url_for('login'))
 
-            # Create new campaign
+        # Check if the user exists
+        current_user_data = db.session.execute(
+            db.select(Users).filter_by(email=session['email'])
+        ).scalar_one()
+        
+        # Check if the user has department access
+        if not current_user_data.department_id:
+            flash("You don't have permission to create campaigns. You must be assigned to a department.", "error")
+            return redirect(url_for('admin_dashboard'))
+            
+        # Get the user's department with a direct query
+        department = db.session.execute(
+            db.select(Department).filter_by(department_id=current_user_data.department_id)
+        ).scalar_one_or_none()
+        
+        if not department:
+            flash("Your assigned department was not found in the system.", "error")
+            return redirect(url_for('admin_dashboard'))
+        
+        if request.method == 'POST' and form.validate_on_submit():
+            # Get campaign details from form
+            title = request.form.get('campaign_title')
+            description = request.form.get('campaign_description')
+            campaign_type = request.form.get('campaign_type')
+            # Add date validation
             try:
-                new_campaign = Campaign(
-                    title=form.title.data.strip(),
-                    description=form.description.data.strip(),
-                    department_id=current_user.department_id,
-                    feedback_type=form.feedback_type.data
-                )
+                start_date = datetime.strptime(request.form.get('start_date'), '%Y-%m-%d')
+                end_date = datetime.strptime(request.form.get('end_date'), '%Y-%m-%d')
+            except (ValueError, TypeError) as e:
+                flash("Invalid date format. Please use YYYY-MM-DD format", "error")
+                return redirect(url_for('create_campaign'))
+            
+            # Create new campaign with the admin's department_id
+            new_campaign = Campaign(
+                department_id=current_user.department_id,
+                title=title,
+                description=description,
+                campaign_type=campaign_type,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            try:
                 db.session.add(new_campaign)
                 db.session.commit()
-                return jsonify({
-                'success': True,
-                'campaign_id': new_campaign.campaign_id
-                })
+                # Store campaign ID in session for use in next step
+                session['current_campaign_id'] = new_campaign.campaign_id
+                flash("Campaign created successfully! Add questions now", "success")
+                
+                # Redirect to add questions page
+                return redirect(url_for('add_questions'))
             except Exception as e:
                 db.session.rollback()
-                print(f"Insertion error: {e}")
-                return jsonify({
-                    'success': False,
-                    'message': "An error occurred while creating the campaign."
-                })
-
-        except NoResultFound:
-            return jsonify({
-                'success': False,
-                'message': "An error occurred while creating the campaign."
-            })
-    # If form validation failed on POST
-    if request.method == 'POST':
-        return jsonify({
-            'success': False,
-            'message': "Please check the form for errors."
-        })
-
-    return render_template('create_campaign.html', form=form)
-
-@app.route('/general_feedback/<int:campaign_id>', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def general_feedback(campaign_id):
-    try:
-        campaign = db.session.execute(
-            db.select(Campaign).filter_by(campaign_id=campaign_id)
-        ).scalar_one()
+                flash(f"Error creating campaign: {str(e)}", "error")
+                return redirect(url_for('create_campaign'))
         
-        # Create form instance for CSRF token
-        form = GeneralFeedbackForm()
-        
-        if campaign.feedback_type != 'general':
-            if request.is_xhr:  # Check if it's an AJAX request
-                return jsonify({'error': 'Invalid feedback type'}), 400
-            flash("Invalid feedback type for this campaign.", "error")
-            return redirect(url_for('dashboard'))
-            
-        if request.method == 'POST':
-            if not form.validate():  # Validate CSRF token
-                if request.is_xhr:
-                    return jsonify({'error': 'Invalid CSRF token'}), 400
-                flash("Invalid CSRF token.", "error")
-                return redirect(url_for('dashboard'))
-                
-            if request.is_xhr:
-                data = request.get_json()
-                # Process your data
-                return jsonify({'success': True, 'message': 'Feedback submitted'})
-            
-            # Handle regular form submission
-            try:
-                # Get form data
-                question_text = request.form.get('question')
-                question_type = request.form.get('question_type')
-                
-                # Validate form data
-                if not question_text or not question_type:
-                    flash("Question and question type are required.", "error")
-                    return redirect(url_for('general_feedback', campaign_id=campaign_id))
-                
-                # Create new feedback question
-                new_question = FeedbackQuestion(
-                    campaign_id=campaign_id,
-                    question=question_text,
-                    question_type=question_type,
-                    created_at=datetime.now(),
-                    created_by=current_user.id
-                )
-                
-                # Add to database
-                db.session.add(new_question)
-                db.session.commit()
-                
-                flash("Question added successfully!", "success")
-            except Exception as e:
-                db.session.rollback()
-                flash("Error adding question. Please try again.", "error")
-                # Log the error
-                current_app.logger.error(f"Error adding feedback question: {str(e)}")
-            
-            return redirect(url_for('general_feedback', campaign_id=campaign_id))
-            
-        # Get questions for the template
-        questions = db.session.execute(
-            db.select(FeedbackQuestion).filter_by(campaign_id=campaign_id)
-        ).scalars().all()
-        
-        return render_template('general_feedback.html',
-                            campaign=campaign,
-                            form=form,  # Pass form to template
-                            questions=questions)
-                            
-    except NoResultFound:
-        if request.is_xhr:
-            return jsonify({'error': 'Campaign not found'}), 404
-        flash("Campaign not found.", "error")
-        return redirect(url_for('dashboard'))
-    
     except Exception as e:
-        current_app.logger.error(f"Error retrieving campaign: {str(e)}")
-        if request.is_xhr:
-            return jsonify({'error': 'An error occurred'}), 500
-        flash("An error occurred.", "error")
-        return redirect(url_for('dashboard'))
+        db.session.rollback()
+        flash(f"Error processing form: {str(e)}", "error")
+        return redirect(url_for('create_campaign'))
     
-    return render_template('general_feedback.html', campaign=campaign, form=form)
+    # GET request - show form to create campaign
+    # Pass the department info to display in the template
+    return render_template('create_campaign.html', department=department, form = form, min_date=datetime.now().strftime('%Y-%m-%d'))
 
-@app.route('/get_category_questions/<category>')
-@login_required
-def get_category_questions(category):
-    # Define questions for each category
-    questions = {
-        'student-council': [
-            {'question': 'Are you satisfied with the Student Council representation?', 'type': 'general'},
-            {'question': 'How can the Student Council improve its services?', 'type': 'feedback'}
-        ],
-        'academic': [
-            {'question': 'Are you satisfied with the quality of your courses?', 'type': 'rating'},
-            {'question': 'How could we improve the academic workload?', 'type': 'feedback'}
-        ],
-        # Add other categories as needed
-    }
-    
-    if category not in questions:
-        return jsonify({'error': 'Invalid category'}), 400
-        
-    # Generate HTML for the questions
-    html = render_template('_category_questions.html',
-                        questions=questions[category],
-                        category=category)
-    
-    return jsonify({'html': html})
 
-@app.route('/docket_feedback/<int:campaign_id>', methods=['GET', 'POST'])
+# Route for adding questions
+@app.route('/add_questions', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
-def docket_feedback(campaign_id):
-    try:
-        campaign = db.session.execute(
-            db.select(Campaign).filter_by(campaign_id=campaign_id)
-        ).scalar_one()
+def add_questions():
+    campaign_id = session.get('current_campaign_id')
+    
+    if not campaign_id:
+        flash("Campaign not found. Please create a campaign first.", "error")
+        return redirect(url_for('create_campaign'))
+    
+    campaign = Campaign.query.get(campaign_id)
+    
+    if request.method == 'POST':
+        # Get question data from form
+        question_texts = request.form.getlist('question_text')
+        question_types = request.form.getlist('question_type')
         
-        # Create form instance for CSRF token
-        form = DocketFeedbackForm()
+        if not question_texts:
+            flash("Please add at least one question.", "error")
+            return render_template('add_questions.html', campaign=campaign)
         
-        # Check if it's an AJAX request
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        # Create a temporary form in the session (not yet saved to database)
+        temp_form = {
+            'campaign_id': campaign_id,
+            'form_name': f"{campaign.campaign_title} - Draft",
+            'form_version': 1,
+            'questions': []
+        }
         
-        # Validate campaign type
-        if campaign.feedback_type != 'docket':
-            if is_ajax:
-                return jsonify({'error': 'Invalid feedback type'}), 400
-            flash("Invalid feedback type.", "error")
-            return redirect(url_for('dashboard'))
-
-        if request.method == 'POST':
-            # Validate CSRF token
-            if not form.validate():
-                if is_ajax:
-                    return jsonify({'error': 'Invalid CSRF token'}), 400
-                flash("Invalid CSRF token.", "error")
-                return redirect(url_for('dashboard'))
-
-            # Handle AJAX submission
-            if is_ajax:
-                data = request.get_json()
-                # Process your data
-                return jsonify({'success': True, 'message': 'Feedback submitted'})
-
-            # Handle regular form submission
-            try:
-                # Get form data
-                question_text = request.form.get('question')
-                question_type = request.form.get('question_type')
-                
-                # Validate form data
-                if not question_text or not question_type:
-                    flash("Question and question type are required.", "error")
-                    return redirect(url_for('docket_feedback', campaign_id=campaign_id))
-                
-                # Create new feedback question
-                new_question = FeedbackQuestion(
-                    campaign_id=campaign_id,
-                    question=question_text,
-                    question_type=question_type,
-                    created_at=datetime.now(),
-                    created_by=current_user.id
-                )
-                
-                # Add to database
-                db.session.add(new_question)
-                db.session.commit()
-                flash("Question added successfully!", "success")
-
-            except Exception as e:
-                db.session.rollback()
-                flash("Error adding question. Please try again.", "error")
-                # Log the error
-                current_app.logger.error(f"Error adding feedback question: {str(e)}")
-
-            return redirect(url_for('docket_feedback', campaign_id=campaign_id))
-
-        # GET request - render template
-        questions = db.session.execute(
-            db.select(FeedbackQuestion).filter_by(campaign_id=campaign_id)
-        ).scalars().all()
-        
-        return render_template('general_feedback.html',
-                            campaign=campaign,
-                            form=form,
-                            questions=questions)
-
-    except NoResultFound:
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'error': 'Campaign not found'}), 404
-        flash("Campaign not found.", "error")
-        return redirect(url_for('dashboard'))
-
-@app.route('/service_feedback/<int:campaign_id>')
-@login_required
-@role_required('admin')
-def service_feedback(campaign_id):
-    try:
-        campaign = db.session.execute(
-            db.select(Campaign).filter_by(campaign_id=campaign_id)
-        ).scalar_one()
-        
-        if campaign.feedback_type != 'service':
-            flash("Invalid feedback type for this campaign.", "error")
-            return redirect(url_for('dashboard'))
-            
-        return render_template('service_feedback.html', campaign=campaign)
-        
-    except NoResultFound:
-        flash("Campaign not found.", "error")
-        return redirect(url_for('dashboard'))
-
-from flask import jsonify, request, flash, redirect, url_for
-from sqlalchemy.orm.exc import NoResultFound
-
-@app.route('/save_general_feedback/<int:campaign_id>', methods=['POST'])
-@login_required
-@role_required('admin')
-def save_general_feedback(campaign_id):
-    try:
-        form = GeneralFeedbackForm()
-        
-        # Verify campaign exists and is of correct type
-        campaign = db.session.execute(
-            db.select(Campaign).filter_by(
-                campaign_id=campaign_id,
-                feedback_type='general'
-                )
-            ).scalar_one()
-        
-        if not form.validate_on_submit():
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return jsonify({
-                    'success': False,
-                    'errors': form.errors
-                }), 400
-            flash("Please correct the form errors.", "error")
-            return redirect(url_for('general_feedback', campaign_id=campaign_id))
-
-        try:
-            # Handle file upload if present
-            file_path = None
-            if 'attachment' in request.files:
-                file = request.files['attachment']
-                file_path = handle_file_upload(file)
-
-            # Create new feedback question
-            new_question = FeedbackQuestion(
-                campaign_id=campaign_id,
-                question=form.question.data,
-                question_type=form.question_type.data,
-                attachment_path=file_path,
-                created_at=datetime.now(),
-                created_by=current_user.id
-            )
-
-            db.session.add(new_question)
-            db.session.commit()
-
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return jsonify({
-                    'success': True,
-                    'message': 'Question added successfully!'
+        # Since we haven't saved the form yet, we can't add questions to the database
+        # We'll store them in the session temporarily
+        for i in range(len(question_texts)):
+            if question_texts[i].strip():  # Check if question text is not empty
+                temp_form['questions'].append({
+                    'question_text': question_texts[i],
+                    'question_type': question_types[i] if i < len(question_types) else 'general'
                 })
+        
+        # Store the temporary form in the session
+        session['temp_form'] = temp_form
+        
+        # Redirect to preview form
+        return redirect(url_for('preview_form'))
+    
+    # GET request - show form to add questions
+    return render_template('add_questions.html', campaign=campaign)
 
-            flash("Question added successfully!", "success")
-            return redirect(url_for('general_feedback', campaign_id=campaign_id))
+# Route for previewing the form
+@app.route('/preview_form', methods=['GET'])
+def preview_form():
+    try:
+        temp_form = session.get('temp_form')
+        
+        if not temp_form:
+            flash("No form data found. Please add questions first.", "error")
+            return redirect(url_for('add_questions'))
+        
+        campaign = Campaign.query.get(temp_form['campaign_id'])
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error processing form: {str(e)}", "error")
+        return redirect(url_for('add_questions'))
+    
+    return render_template('preview_form.html', form=temp_form, campaign=campaign)
 
+# Route for reviewing the form (edit or publish)
+@app.route('/review_form', methods=['POST'])
+def review_form():
+    action = request.form.get('action')
+    
+    try:
+        if action == 'edit':
+            # Redirect to edit form page
+            return redirect(url_for('edit_form'))
+        elif action == 'discard':
+            # Clear the temporary form from session
+            session.pop('temp_form', None)
+            flash("Form has been discarded.", "info")
+            return redirect(url_for('create_campaign'))
+        elif action == 'publish':
+            # Save the form and questions to the database
+            return redirect(url_for('save_form'))
+        
+        flash("Invalid action.", "error")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error processing form: {str(e)}", "error")
+    return redirect(url_for('preview_form'))
+
+# Route for editing the form
+@app.route('/edit_form', methods=['GET', 'POST'])
+def edit_form():
+    temp_form = session.get('temp_form')
+    
+    if not temp_form:
+        flash("No form data found. Please add questions first.", "error")
+        return redirect(url_for('add_questions'))
+    
+    if request.method == 'POST':
+        # Get updated form details
+        form_name = request.form.get('form_name')
+        logo_path = request.form.get('logo_path')
+        location_details = request.form.get('location_details')
+        
+        # Update temporary form in session
+        temp_form['form_name'] = form_name
+        temp_form['logo_path'] = logo_path
+        temp_form['location_details'] = location_details
+        
+        # Get updated questions
+        question_ids = request.form.getlist('question_id')
+        question_texts = request.form.getlist('question_text')
+        question_types = request.form.getlist('question_type')
+        
+        # Clear existing questions
+        temp_form['questions'] = []
+        
+        # Add updated questions
+        for i in range(len(question_texts)):
+            if question_texts[i].strip():  # Check if question text is not empty
+                temp_form['questions'].append({
+                    'question_id': question_ids[i] if i < len(question_ids) else None,
+                    'question_text': question_texts[i],
+                    'question_type': question_types[i] if i < len(question_types) else 'general'
+                })
+        
+        # Update session
+        session['temp_form'] = temp_form
+        
+        # Redirect to preview page
+        return redirect(url_for('preview_form'))
+    
+    # GET request - show form for editing
+    campaign = Campaign.query.get(temp_form['campaign_id'])
+    
+    return render_template('edit_form.html', form=temp_form, campaign=campaign)
+
+
+# Route for saving the form to the database
+@app.route('/save_form', methods=['GET', 'POST'])
+def save_form():
+    temp_form = session.get('temp_form')
+    
+    if not temp_form:
+        flash("No form data found. Please add questions first.", "error")
+        return redirect(url_for('add_questions'))
+    
+    if request.method == 'POST':
+        # Get final form details
+        form_name = request.form.get('form_name')
+        status = request.form.get('status', 'draft')
+        logo_path = request.form.get('logo_path')
+        location_details = request.form.get('location_details')
+    else:
+        # Use data from session
+        form_name = temp_form.get('form_name')
+        status = 'draft'
+        logo_path = temp_form.get('logo_path')
+        location_details = temp_form.get('location_details')
+    
+    # Get the latest version number for this campaign
+    latest_form = FormFeedback.query.filter_by(
+        campaign_id=temp_form['campaign_id']
+    ).order_by(FormFeedback.form_version.desc()).first()
+    
+    form_version = 1
+    if latest_form:
+        form_version = latest_form.form_version + 1
+    
+    # If status is 'active', set all other forms for this campaign to 'archived'
+    if status == 'active':
+        active_forms = FormFeedback.query.filter_by(
+            campaign_id=temp_form['campaign_id'], 
+            status='active'
+        ).all()
+        
+        for form in active_forms:
+            form.status = 'archived'
+        
+        try:
+            db.session.commit()
         except Exception as e:
             db.session.rollback()
-            current_app.logger.error(f"Error saving feedback question: {str(e)}")
-            
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return jsonify({
-                    'success': False,
-                    'error': 'An error occurred while saving the question.'
-                }), 500
-
-            flash("An error occurred while saving the question.", "error")
-            return redirect(url_for('general_feedback', campaign_id=campaign_id))
-
-    except NoResultFound:
-        flash("Campaign not found or invalid feedback type.", "error")
-        return redirect(url_for('dashboard'))
-
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error saving general feedback: {str(e)}")
-        flash("An error occurred while saving the question.", "error")
-
-    return redirect(url_for('general_feedback', campaign_id=campaign_id))
-
-@app.route('/save_docket_feedback/<int:campaign_id>', methods=['POST'])
-@login_required
-@role_required('admin')
-def save_docket_feedback(campaign_id):
+            flash(f"Error updating existing forms: {str(e)}", "error")
+    
+    # Create new form
+    new_form = FormFeedback(
+        campaign_id=temp_form['campaign_id'],
+        form_name=form_name,
+        form_version=form_version,
+        status=status,
+        created_by=session.get('user_id'),
+        logo_path=logo_path,
+        location_details=location_details
+    )
+    
     try:
-        # Verify campaign exists and is of correct type
-        campaign = db.session.execute(
-            db.select(Campaign).filter_by(
-                campaign_id=campaign_id,
-                feedback_type='docket'
-            )
-        ).scalar_one()
+        db.session.add(new_form)
+        db.session.flush()  # Get the new form ID
         
-        # Validate required fields
-        docket_number = request.form.get('docket_number', '').strip()
-        question = request.form.get('question', '').strip()
-        
-        if not docket_number or not question:
-            flash("Docket number and question are required.", "error")
-            return redirect(url_for('docket_feedback', campaign_id=campaign_id))
-            
-        # Create new feedback question
-        new_question = FeedbackQuestion(
-            campaign_id=campaign_id,
-            question=question,
-            docket_number=docket_number,
-            feedback_type='docket'
-        )
-        
-        db.session.add(new_question)
-        db.session.commit()
-        
-        flash("Question added successfully.", "success")
-        
-    except NoResultFound:
-        flash("Campaign not found or invalid feedback type.", "error")
-        return redirect(url_for('dashboard'))
-        
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error saving docket feedback: {str(e)}")
-        flash("An error occurred while saving the question.", "error")
-        
-    return redirect(url_for('docket_feedback', campaign_id=campaign_id))
-
-@app.route('/save_service_feedback/<int:campaign_id>', methods=['POST'])
-@login_required
-@role_required('admin')
-def save_service_feedback(campaign_id):
-    try:
-        # Verify campaign exists and is of correct type
-        campaign = db.session.execute(
-            db.select(Campaign).filter_by(
-                campaign_id=campaign_id,
-                feedback_type='service'
-            )
-        ).scalar_one()
-        
-        # Validate required fields
-        service_name = request.form.get('service_name', '').strip()
-        question = request.form.get('question', '').strip()
-        
-        if not service_name or not question:
-            flash("Service name and question are required.", "error")
-            return redirect(url_for('service_feedback', campaign_id=campaign_id))
-            
-        # Create new feedback question
-        new_question = FeedbackQuestion(
-            campaign_id=campaign_id,
-            question=question,
-            service_name=service_name,
-            feedback_type='service'
-        )
-        
-        db.session.add(new_question)
-        db.session.commit()
-        
-        flash("Question added successfully.", "success")
-        
-    except NoResultFound:
-        flash("Campaign not found or invalid feedback type.", "error")
-        return redirect(url_for('dashboard'))
-        
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error saving service feedback: {str(e)}")
-        flash("An error occurred while saving the question.", "error")
-        
-    return redirect(url_for('service_feedback', campaign_id=campaign_id))
-
-@app.route('/add_questions/<int:campaign_id>', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def add_questions(campaign_id):
-    campaign = db.session.execute(db.select(Campaign).filter_by(campaign_id=campaign_id)).scalar_one()
-    feedback_type = campaign.feedback_type
-
-    # Define default questions based on feedback type
-    if feedback_type == 'general':
-        default_questions = [
-            'What is your overall satisfaction with our services?',
-            'What areas do you think we can improve?',
-            'Any additional comments?'
-        ]
-        question_types = ['general'] * len(default_questions)
-
-    elif feedback_type == 'docket':
-        # Get the department ID from the campaign
-        department_id = campaign.department_id
-
-        # Check if the form has been submitted
-        if request.method == 'POST':
-            docket_choice = request.form.get('docket_choice')  # This should be set from the form input
-
-            if docket_choice == 'specific':
-                specific_docket_name = request.form.get('specific_docket_name')
-                specific_docket = db.session.execute(
-                    db.select(Dockets).filter_by(name=specific_docket_name, department_id=department_id, deleted_at=None)
-                ).scalar_one_or_none()
-
-                if specific_docket:
-                    default_questions = [
-                        f'Feedback for {specific_docket.name}:',
-                        'What is your feedback/idea/complaint?',
-                        'What should be brought back and why? (optional)'
-                    ]
-                    question_types = ['docket', 'feedback', 'optional']
-                else:
-                    # Flash message when the specified docket does not exist
-                    flash('The specified docket does not exist or is not available.', 'error')
-                    return redirect(url_for('add_questions', campaign_id=campaign_id))  # Redirect to try again
-
-            elif docket_choice == 'all':
-                # Fetch all dockets related to the department
-                dockets = db.session.execute(
-                    db.select(Dockets).filter_by(department_id=department_id, deleted_at=None)
-                ).scalars()
-
-                docket_names = [docket.name for docket in dockets]
-
-                if not docket_names:
-                    default_questions = [
-                        'No available dockets for feedback at this time.',
-                        'Please provide your feedback/idea/complaint:'
-                    ]
-                    question_types = ['info', 'feedback']
-                else:
-                    default_questions = [
-                        f'Please select a docket from the following: {", ".join(docket_names)}',
-                        'What is your feedback/idea/complaint?',
-                        'What should be brought back and why? (optional)'
-                    ]
-                    question_types = ['docket', 'feedback', 'optional']
-
-        else:
-            # If it's a GET request, show options for choosing a docket
-            return render_template('choose_docket.html', campaign=campaign)
-
-    elif feedback_type == 'service':
-        default_questions = [
-            'How would you rate our services?',
-            'What improvements can be made?',
-            'Please provide any additional feedback regarding our services.'
-        ]
-        question_types = ['rating', 'improvement', 'feedback']
-
-    else:
-        default_questions = []
-        question_types = []
-
-    if request.method == 'POST':
-        questions = request.form.getlist('questions')
-        questions_type = request.form.getlist('questions_type')
-
-        for question_text, question_type in zip(questions, questions_type):
+        # Save questions
+        for q in temp_form['questions']:
             new_question = Question(
-                campaign_id=campaign_id,
-                question_text=question_text,
-                question_type=question_type,
-                created_at=datetime.datetime.now()
+                form_id=new_form.form_id,
+                question_text=q['question_text'],
+                question_type=q['question_type']
             )
             db.session.add(new_question)
-
+        
+        # Create a unique URL for the form
+        url_code = str(uuid.uuid4())[:8]
+        new_url = FormUrl(
+            form_id=new_form.form_id,
+            url_code=url_code,
+            is_active=True
+        )
+        db.session.add(new_url)
+        
         db.session.commit()
-        flash(f"Questions added successfully to the campaign '{campaign.title}'.", "success")
-        return redirect(url_for('create_feedback_form', campaign_id=campaign.campaign_id))
+        
+        # Clear the temporary form from session
+        session.pop('temp_form', None)
+        
+        # Store form ID in session for QR code generation
+        session['current_form_id'] = new_form.form_id
+        session['form_url_code'] = url_code
+        
+        flash("Form saved successfully!", "success")
+        return redirect(url_for('generate_qr_code'))
+    
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error saving form: {str(e)}", "error")
+        return redirect(url_for('preview_form'))
+    
+# Route for generating QR code
+@app.route('/generate_qr_code', methods=['GET'])
+def generate_qr_code():
+    form_id = session.get('current_form_id')
+    url_code = session.get('form_url_code')
+    
+    if not form_id or not url_code:
+        flash("Form information not found.", "error")
+        return redirect(url_for('admin_dashboard'))
+    
+    form = FormFeedback.query.get(form_id)
+    
+    if not form:
+        flash("Form not found.", "error")
+        return redirect(url_for('admin_dashboard'))
+    
+    # Generate the feedback form URL
+    feedback_url = url_for('feedback_form', url_code=url_code, _external=True)
+    
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(feedback_url)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Save QR code to BytesIO
+    buffered = BytesIO()
+    img.save(buffered)
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    return render_template(
+        'qr_code.html',
+        form=form,
+        feedback_url=feedback_url,
+        qr_code=img_str
+    )
 
-    return render_template('add_questions.html', campaign=campaign, default_questions=default_questions, question_types=question_types)
+# Route for the feedback form (what respondents will see)
+@app.route('/feedback/<url_code>', methods=['GET', 'POST'])
+def feedback_form(url_code):
+    form_url = FormUrl.query.filter_by(url_code=url_code, is_active=True).first()
+    
+    if not form_url:
+        return render_template('error.html', message="Form not found or inactive.")
+    
+    form = FormFeedback.query.get(form_url.form_id)
+    questions = Question.query.filter_by(form_id=form.form_id).all()
+    campaign = Campaign.query.get(form.campaign_id)
+    
+    if request.method == 'POST':
+        # Process submitted feedback...
+        # This is where you'd save the user's answers
+        flash("Thank you for your feedback!", "success")
+        return redirect(url_for('thank_you'))
+    
+    return render_template(
+        'feedback_form.html',
+        form=form,
+        questions=questions,
+        campaign=campaign
+    )
+
+# Route for viewing all campaigns
+@app.route('/view_campaigns')
+def view_campaigns():
+    # Get department ID from logged-in user or request
+    department_id = request.args.get('department_id')
+    user_id = session.get('user_id')
+    
+    if department_id:
+        campaigns = Campaign.query.filter_by(department_id=department_id).all()
+    elif user_id:
+        # Show campaigns for departments where user is admin
+        user_departments = Department.query.filter_by(admin_id=user_id).all()
+        department_ids = [dept.department_id for dept in user_departments]
+        campaigns = Campaign.query.filter(Campaign.department_id.in_(department_ids)).all()
+    else:
+        campaigns = []
+    
+    return render_template('view_campaigns.html', campaigns=campaigns)
+
+# Route for viewing forms for a campaign
+@app.route('/view_forms/<int:campaign_id>')
+def view_forms(campaign_id):
+    campaign = Campaign.query.get_or_404(campaign_id)
+    forms = FormFeedback.query.filter_by(campaign_id=campaign_id).order_by(
+        FormFeedback.status,
+        FormFeedback.form_version.desc()
+    ).all()
+    
+    return render_template('view_forms.html', campaign=campaign, forms=forms)
+
+
+
+
+# # Now let's modify the add_questions route to handle automatic form creation
+# @app.route('/add_general_questions/<int:campaign_id>', methods=['GET', 'POST'])
+# @login_required
+# @role_required('admin')
+# def add_general_questions(campaign_id):
+#     if request.method == 'POST':
+#         try:
+#             campaign = Campaign.query.get_or_404(campaign_id)
+#             questions_data = request.json.get('questions', [])
+            
+#             # Create a new form automatically
+#             # Get the latest version number for this campaign
+#             latest_form = FormFeedback.query.filter_by(campaign_id=campaign_id)\
+#                 .order_by(FormFeedback.version.desc()).first()
+#             new_version = (latest_form.version + 1) if latest_form else 1
+            
+#             # Create new form using campaign title
+#             new_form = FormFeedback(
+#                 campaign_id=campaign_id,
+#                 name=f"{campaign.title} - Version {new_version}",
+#                 version=new_version,
+#                 status='active'  # This will be the active version
+#             )
+#             db.session.add(new_form)
+#             db.session.flush()  # Get the new form ID
+            
+#             # Archive any previously active forms for this campaign
+#             FormFeedback.query.filter_by(
+#                 campaign_id=campaign_id,
+#                 status='active'
+#             ).filter(FormFeedback.form_id != new_form.form_id)\
+#             .update({'status': 'archived'})
+            
+#             # Save questions linked to both form and campaign
+#             for question in questions_data:
+#                 new_question = Question(
+#                     form_id=new_form.form_id,
+#                     campaign_id=campaign_id,
+#                     question_text=question['text'],
+#                     question_type='general'
+#                 )
+#                 db.session.add(new_question)
+            
+#             db.session.commit()
+            
+#             return jsonify({
+#                 'success': True,
+#                 'form_id': new_form.form_id
+#             })
+            
+#         except Exception as e:
+#             db.session.rollback()
+#             return jsonify({
+#                 'success': False,
+#                 'message': str(e)
+#             }), 500
+            
+#     # GET request - show the question addition form
+#     return render_template('add_general_questions.html', campaign_id=campaign_id)
+
+
+# # Routes for handling questions after campaign creation
+# @app.route('/add_questions/<campaign_id>/<feedback_type>', methods=['GET', 'POST'])
+# @login_required
+# @role_required('admin')
+# def add_questions(campaign_id, feedback_type):
+#     if feedback_type not in ['general', 'docket', 'service']:
+#         return redirect(url_for('create_campaign'))
+    
+#     form = QuestionForm()
+    
+#     try:
+#         campaign = db.session.execute(
+#             db.select(Campaign).filter_by(campaign_id=campaign_id)
+#         ).scalar_one()
+        
+#         if request.method == 'POST':
+#             if form.validate_on_submit():
+#                 new_question = Question(
+#                     form_id=campaign_id,
+#                     question_text=form.question_text.data,
+#                     question_type=feedback_type
+#                 )
+                
+#                 db.session.add(new_question)
+#                 db.session.commit()
+                
+#                 # Get all questions for this campaign to check if we should create temporary form
+#                 questions = db.session.execute(
+#                     db.select(Question).filter_by(form_id=campaign_id)
+#                 ).scalars().all()
+                
+#                 temp_form_name = f"Temporary_{feedback_type}_Form_{campaign_id}"
+                
+#                 return jsonify({
+#                     'success': True,
+#                     'question_id': new_question.question_id,
+#                     'temp_form_name': temp_form_name,
+#                     'questions_count': len(questions)
+#                 })
+        
+#         # GET request - show appropriate template based on feedback type
+#         questions = db.session.execute(
+#             db.select(Question).filter_by(form_id=campaign_id)
+#         ).scalars().all()
+        
+#         template_name = f'add_{feedback_type}_questions.html'
+#         return render_template(
+#             template_name,
+#             form=form,
+#             questions=questions,
+#             campaign=campaign
+#         )
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
+
+# @app.route('/campaign/<int:campaign_id>/forms')
+# @login_required
+# @role_required('admin')
+# def list_campaign_forms(campaign_id):
+#     """Display all forms associated with a campaign, showing their versions and status."""
+#     try:
+#         campaign = Campaign.query.get_or_404(campaign_id)
+#         # Get forms ordered by creation date, newest first
+#         forms = FormFeedback.query.filter_by(campaign_id=campaign_id)\
+#             .order_by(desc(FormFeedback.created_at)).all()
+        
+#         return render_template('campaign_forms.html',
+#                             campaign=campaign,
+#                             forms=forms)
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
+# @app.route('/campaign/<int:campaign_id>/create_form', methods=['GET', 'POST'])
+# @login_required
+# @role_required('admin')
+# def create_campaign_form(campaign_id):
+#     """Create a new form for an existing campaign."""
+#     try:
+#         campaign = Campaign.query.get_or_404(campaign_id)
+        
+#         if request.method == 'POST':
+#             # Get the highest version number for this campaign's forms
+#             latest_form = FormFeedback.query.filter_by(campaign_id=campaign_id)\
+#                 .order_by(desc(FormFeedback.version)).first()
+#             new_version = (latest_form.version + 1) if latest_form else 1
+            
+#             # Create new form
+#             new_form = FormFeedback(
+#                 campaign_id=campaign_id,
+#                 name=request.form.get('name', f"{campaign.title} - Version {new_version}"),
+#                 version=new_version,
+#                 status='draft',
+#                 language=request.form.get('language', 'en'),
+#                 format=request.form.get('format', 'web')
+#             )
+#             db.session.add(new_form)
+#             db.session.commit()
+            
+#             # If this is a new version of an existing form, copy questions from the previous version
+#             if request.form.get('copy_from_form'):
+#                 source_form_id = int(request.form.get('copy_from_form'))
+#                 source_questions = Question.query.filter_by(form_id=source_form_id).all()
+                
+#                 for question in source_questions:
+#                     new_question = Question(
+#                         form_id=new_form.form_id,
+#                         question_text=question.question_text,
+#                         question_type=question.question_type
+#                     )
+#                     db.session.add(new_question)
+                
+#                 db.session.commit()
+            
+#             return redirect(url_for('edit_form', form_id=new_form.form_id))
+        
+#         # Get existing forms for this campaign (for copying questions)
+#         existing_forms = FormFeedback.query.filter_by(campaign_id=campaign_id).all()
+        
+#         return render_template('create_form.html',
+#                             campaign=campaign,
+#                             existing_forms=existing_forms)
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+
+# @app.route('/form/<int:form_id>/edit', methods=['GET', 'POST'])
+# @login_required
+# @role_required('admin')
+# def edit_form(form_id):
+#     """Edit an existing form, including its questions."""
+#     try:
+#         form = FormFeedback.query.get_or_404(form_id)
+        
+#         if request.method == 'POST':
+#             form.name = request.form.get('name', form.name)
+#             form.language = request.form.get('language', form.language)
+#             form.format = request.form.get('format', form.format)
+            
+#             # Handle question updates
+#             questions_data = request.json.get('questions', [])
+            
+#             # Remove existing questions
+#             Question.query.filter_by(form_id=form_id).delete()
+            
+#             # Add updated questions
+#             for question in questions_data:
+#                 new_question = Question(
+#                     form_id=form_id,
+#                     question_text=question['text'],
+#                     question_type=question['type']
+#                 )
+#                 db.session.add(new_question)
+            
+#             db.session.commit()
+#             return jsonify({'success': True})
+        
+#         questions = Question.query.filter_by(form_id=form_id).all()
+#         return render_template('edit_form.html', form=form, questions=questions)
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+
+# @app.route('/form/<int:form_id>/status', methods=['POST'])
+# @login_required
+# @role_required('admin')
+# def update_form_status(form_id):
+#     """Update the status of a form (draft, active, archived)."""
+#     try:
+#         form = FormFeedback.query.get_or_404(form_id)
+#         new_status = request.json.get('status')
+        
+#         if new_status not in ['draft', 'active', 'archived']:
+#             return jsonify({'error': 'Invalid status'}), 400
+        
+#         # If activating this form, archive other active forms for this campaign
+#         if new_status == 'active':
+#             active_forms = FormFeedback.query.filter_by(
+#                 campaign_id=form.campaign_id,
+#                 status='active'
+#             ).all()
+#             for active_form in active_forms:
+#                 active_form.status = 'archived'
+        
+#         form.status = new_status
+#         db.session.commit()
+        
+#         return jsonify({'success': True})
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+    
+    # # GET request - show edit form
+    # campaign = db.session.execute(
+    #     db.select(Campaign).filter_by(campaign_id=campaign_id)
+    # ).scalar_one()
+    
+    # questions = db.session.execute(
+    #     db.select(Question).filter_by(form_id=campaign_id)
+    # ).scalars().all()
+    
+    # return render_template(
+    #     'edit_form.html',
+    #     campaign=campaign,
+    #     questions=questions
+    # )
+
+
+# @app.route('/add_general_questions/<int:campaign_id>', methods=['GET', 'POST'])
+# @login_required
+# @role_required('admin')
+# def add_general_questions(campaign_id):
+#     form = GeneralQuestionsForm()
+#     campaign = db.session.execute(db.select(Campaign).filter_by(campaign_id=campaign_id)).scalar_one()
+    
+#     default_questions = [
+#         'What is your overall satisfaction with our services?',
+#         'What do you like most about our services?',
+#         'Any additional comments?'
+#     ]
+#     question_types = ['general'] * len(default_questions)
+
+#     if request.method == 'POST':
+#         return save_questions(campaign_id, campaign)
+
+#     return render_template('add_questions.html',
+#                         campaign=campaign,
+#                         default_questions=default_questions,
+#                         question_types=question_types)
+
+# @app.route('/add_docket_questions/<int:campaign_id>', methods=['GET', 'POST'])
+# @login_required
+# @role_required('admin')
+# def add_docket_questions(campaign_id):
+#     campaign = db.session.execute(db.select(Campaign).filter_by(campaign_id=campaign_id)).scalar_one()
+#     department_id = campaign.department_id
+
+#     if request.method == 'GET':
+#         return render_template('choose_docket.html', campaign=campaign)
+
+#     docket_choice = request.form.get('docket_choice')
+    
+#     if docket_choice == 'specific':
+#         return handle_specific_docket(campaign_id, department_id, campaign)
+#     elif docket_choice == 'all':
+#         return handle_all_dockets(campaign_id, department_id, campaign)
+
+#     flash('Invalid docket choice.', 'error')
+#     return redirect(url_for('add_docket_questions', campaign_id=campaign_id))
+
+# @app.route('/add_service_questions/<int:campaign_id>', methods=['GET', 'POST'])
+# @login_required
+# @role_required('admin')
+# def add_service_questions(campaign_id):
+#     campaign = db.session.execute(db.select(Campaign).filter_by(campaign_id=campaign_id)).scalar_one()
+    
+#     default_questions = [
+#         'How would you rate our services?',
+#         'What improvements can be made?',
+#         'Please provide any additional feedback regarding our services.'
+#     ]
+#     question_types = ['rating', 'improvement', 'feedback']
+
+#     if request.method == 'POST':
+#         return save_questions(campaign_id, campaign)
+
+#     return render_template('add_questions.html',
+#                         campaign=campaign,
+#                         default_questions=default_questions,
+#                         question_types=question_types)
+
+# # Helper functions
+# def save_questions(campaign_id, campaign):
+#     questions = request.form.getlist('questions')
+#     questions_type = request.form.getlist('questions_type')
+
+#     for question_text, question_type in zip(questions, questions_type):
+#         new_question = FeedbackQuestion (campaign_id=campaign_id,
+#             question=question_text,
+#             question_type=question_type,
+#             feedback_type='general',
+#             created_at=datetime.now(),
+#             updated_at=datetime.now()
+#         )
+#         db.session.add(new_question)
+
+#     db.session.commit()
+#     flash(f"Questions added successfully to the campaign '{campaign.title}'.", "success")
+#     return redirect(url_for('create_feedback_form', campaign_id=campaign.campaign_id))
+
+# def handle_specific_docket(campaign_id, department_id, campaign):
+#     specific_docket_name = request.form.get('specific_docket_name')
+#     specific_docket = db.session.execute(
+#         db.select(Dockets).filter_by(
+#             name=specific_docket_name,
+#             department_id=department_id,
+#             deleted_at=None
+#         )
+#     ).scalar_one_or_none()
+
+#     if not specific_docket:
+#         flash('The specified docket does not exist or is not available.', 'error')
+#         return redirect(url_for('add_docket_questions', campaign_id=campaign_id))
+
+#     default_questions = [
+#         f'Feedback for {specific_docket.name}:',
+#         'What is your feedback/idea/complaint?',
+#         'What should be brought back and why? (optional)'
+#     ]
+#     question_types = ['docket', 'feedback', 'optional']
+
+#     return render_template('add_questions.html',
+#                         campaign=campaign,
+#                         default_questions=default_questions,
+#                         question_types=question_types)
+
+# def handle_all_dockets(campaign_id, department_id, campaign):
+#     dockets = db.session.execute(
+#         db.select(Dockets).filter_by(department_id=department_id, deleted_at=None)
+#     ).scalars()
+
+#     docket_names = [docket.name for docket in dockets]
+
+#     if not docket_names:
+#         default_questions = [
+#             'No available dockets for feedback at this time.',
+#             'Please provide your feedback/idea/complaint:'
+#         ]
+#         question_types = ['info', 'feedback']
+#     else:
+#         default_questions = [
+#             f'Please select a docket from the following: {", ".join(docket_names)}',
+#             'What is your feedback/idea/complaint?',
+#             'What should be brought back and why? (optional)'
+#         ]
+#         question_types = ['docket', 'feedback', 'optional']
+
+#     return render_template('add_questions.html',
+#                         campaign=campaign,
+#                         default_questions=default_questions,
+#                         question_types=question_types)
 
 
 # @app.route('/create_feedback_form/<int:campaign_id>', methods=['GET', 'POST'])
@@ -1664,154 +2100,6 @@ def generate_qrcode(form_id):
     
     return jsonify({'qr_code': qr_base64})
 
-# Your existing generate_qr route with CSRF protection
-@app.route('/generate', methods=['POST'])
-@csrf.exempt  # If you want to exempt this route from CSRF protection
-def generate_qr():
-    # Get form data
-    url = request.form.get('url')
-    fg_color_type = request.form.get('fg_color_type', 'single')
-    single_color = request.form.get('single_color', 'black')
-    gradient_start = request.form.get('gradient_start', '#000000')
-    gradient_end = request.form.get('gradient_end', '#FFFFFF')
-    eye_color = request.form.get('eye_color', '#FF0000')
-    bg_color = request.form.get('bg_color', 'white')
-    size = int(request.form.get('size', 10))
-    img_format = request.form.get('format', 'PNG')
-
-    # Handle logo
-    logo_file = request.files.get('logo')
-    logo_path = None
-    if logo_file:
-        logo_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(logo_file.filename))
-        logo_file.save(logo_path)
-
-    # Generate QR code
-    qr = qrcode.QRCode(
-        error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=size,
-        border=4
-    )
-    
-    qr.add_data(url)
-    qr.make(fit=True)
-    qr_image = qr.make_image(fill_color="black", back_color=bg_color).convert('RGB')
-
-    # Apply foreground styles
-    if fg_color_type == 'single':
-        qr_image = qr.make_image(fill_color=single_color, back_color=bg_color).convert('RGB')
-    elif fg_color_type == 'gradient':
-        qr_image = apply_gradient(qr_image, gradient_start, gradient_end)
-    elif fg_color_type == 'custom_eyes':
-        qr_image = apply_custom_eye_color(qr_image, qr, eye_color, bg_color)
-
-    # Add logo if uploaded
-    if logo_path:
-        logo = Image.open(logo_path).convert("RGBA")
-        logo = logo.resize((qr_image.size[0] // 4, qr_image.size[1] // 4))
-        pos = ((qr_image.size[0] - logo.size[0]) // 2, (qr_image.size[1] - logo.size[1]) // 2)
-        qr_image.paste(logo, pos, mask=logo)
-        
-        # Clean up the logo file
-        os.remove(logo_path)
-
-    # Save QR code to in-memory file
-    img_io = BytesIO()
-    qr_image.save(img_io, format=img_format)
-    img_io.seek(0)
-    
-    mime_type = f"image/{img_format.lower()}" if img_format != "JPG" else "image/jpeg"
-    return send_file(
-        img_io,
-        mimetype=mime_type,
-        as_attachment=True,
-        download_name=f'qr_code.{img_format.lower()}'
-    )
-
-# Keep your existing helper functions
-def apply_gradient(image, start_color, end_color):
-    """Apply gradient to the QR code."""
-    gradient = Image.new('RGB', image.size, color=0)
-    draw = ImageDraw.Draw(gradient)
-    
-    for y in range(gradient.height):
-        r = int(start_color[1:3], 16) + (int(end_color[1:3], 16) - int(start_color[1:3], 16)) * y // gradient.height
-        g = int(start_color[3:5], 16) + (int(end_color[3:5], 16) - int(start_color[3:5], 16)) * y // gradient.height
-        b = int(start_color[5:7], 16) + (int(end_color[5:7], 16) - int(start_color[5:7], 16)) * y // gradient.height
-        draw.line([(0, y), (gradient.width, y)], fill=(r, g, b))
-    
-    return Image.blend(image, gradient, alpha=0.5)
-
-def apply_custom_eye_color(image, qr, eye_color, bg_color):
-    """Apply custom color to QR code eyes."""
-    qr_matrix = qr.modules
-    eye_positions = [(6, 6), (len(qr_matrix) - 7, 6), (6, len(qr_matrix) - 7)]
-    draw = ImageDraw.Draw(image)
-    
-    for ex, ey in eye_positions:
-        box_size = image.size[0] // len(qr_matrix)
-        x0, y0 = ex * box_size, ey * box_size
-        x1, y1 = (ex + 7) * box_size, (ey + 7) * box_size
-        draw.rectangle([x0, y0, x1, y1], fill=eye_color)
-    
-    return image
-
-
-# @app.route('/submit_feedback/<int:campaign_id>', methods=['POST'])
-# @login_required
-# def submit_feedback(campaign_id):
-#     campaign = db.session.execute(db.select(Campaign).filter_by(campaign_id=campaign_id)).scalar_one()
-#     feedback_type = campaign.feedback_type
-
-#     if feedback_type == 'general':
-#         satisfaction_rating = request.form.get('satisfaction_rating')
-#         improvement_areas = request.form.get('improvement_areas')
-#         additional_comments = request.form.get('additional_comments')
-
-#         # Save feedback to the database
-#         new_feedback = Feedback(
-#             campaign_id=campaign_id,
-#             satisfaction_rating=satisfaction_rating,
-#             improvement_areas=improvement_areas,
-#             additional_comments=additional_comments,
-#             created_at=datetime.now()
-#         )
-#         db.session.add(new_feedback)
-
-#     elif feedback_type == 'docket':
-#         docket_name = request.form.get('docket_name')
-#         feedback = request.form.get('feedback')
-#         bring_back = request.form.get('bring_back')
-
-#         # Save feedback to the database
-#         new_feedback = Feedback(
-#             campaign_id=campaign_id,
-#             docket_name=docket_name,
-#             feedback=feedback,
-#             bring_back=bring_back,
-#             created_at=datetime.utcnow()
-#         )
-#         db.session.add(new_feedback)
-
-#     elif feedback_type == 'service':
-#         service_rating = request.form.get('service_rating')
-#         improvements = request.form.get('improvements')
-#         additional_feedback = request.form.get('additional_feedback')
-
-#         # Save feedback to the database
-#         new_feedback = Feedback(
-#             campaign_id=campaign_id,
-#             service_rating=service_rating,
-#             improvements=improvements,
-#             additional_feedback=additional_feedback,
-#             created_at=datetime.now()
-#         )
-#         db.session.add(new_feedback)
-
-#     db.session.commit()
-#     flash("Thank you for your feedback!", "success")
-#     return redirect(url_for('dashboard'))
-
 
 @app.route('/manage_dockets', methods=['GET', 'POST'])
 @login_required
@@ -1870,17 +2158,23 @@ def manage_dockets():
 
     # Query all active dockets (excluding soft-deleted ones)
     dockets = db.session.execute(db.select(Dockets).filter_by(department_id=department_id, deleted_at = None)).scalars()
-    return render_template('manage_dockets.html', department=department, dockets=dockets , form=form)
+    return render_template('admins/manage_dockets.html', department=department, dockets=dockets , form=form)
 
+
+#super admin dashboard
 @app.route('/super_admin_dashboard')
 @login_required
 def super_admin_dashboard():
     # Code for displaying the dashboard
+    # users = db.session.execute(db.select(Users)).scalars().all()
+    # departments = db.session.execute(db.select(Department)).scalars().all()
     # Show different data based on the role (admin or viewer)
     
     user_role = session.get('user_role')
-    return render_template('super_admin_dashboard.html', user_role=user_role)
+    return render_template('dashboard/super_admin_dashboard.html', user_role=user_role)
 
+
+#admin dashboard
 @app.route('/admin_dashboard')
 @login_required
 def admin_dashboard():
@@ -1888,8 +2182,10 @@ def admin_dashboard():
     # Show different data based on the role (admin or viewer)
     
     user_role = session.get('user_role')
-    return render_template('admin_dashboard.html', user_role=user_role)
+    return render_template('dashboard/admin_dashboard.html', user_role=user_role)
 
+
+#viewer dashboard
 @app.route('/viewer_dashboard')
 @login_required
 def viewer_dashboard():
@@ -1897,8 +2193,124 @@ def viewer_dashboard():
     # Show different data based on the role (admin or viewer)
     
     user_role = session.get('user_role')
-    return render_template('viewer_dashboard.html', user_role=user_role)
+    return render_template('dashboard/viewer_dashboard.html', user_role=user_role)
 
+
+def viewer_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('user_role') != 'viewer':
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+@app.route('/view_feedback', methods=['GET', 'POST'])
+@viewer_required
+def view_feedback():
+    try:
+        form = FeedbackViewForm()
+        
+        if form.validate_on_submit():
+            feedback_type = form.feedback_type.data
+        else:
+            feedback_type = request.args.get('feedback_type', 'general')
+        
+        feedback = db.session.query(Feedback).filter(
+            Feedback.type == feedback_type,
+            Feedback.status == 'answered'
+        ).order_by(Feedback.date_answered.desc()).all()
+        
+        return render_template(
+            'view_feedback.html',
+            form=form,
+            feedback=feedback,
+            feedback_type=feedback_type
+        )
+    except Exception as e:
+        db.session.rollback()
+        print(f"Deletion error: {e}")
+        flash("Failed to delete the feedback")
+        return redirect(url_for('view_feedback'))
+
+
+@app.route('/view_department_activity', methods=['GET', 'POST'])
+@viewer_required
+def view_department_activity():
+    try:
+        form = DepartmentActivityViewForm()
+        activities = db.session.query(DepartmentActivity)\
+            .order_by(DepartmentActivity.date.desc()).all()
+        
+        return render_template(
+            'view_department_activity.html',
+            form=form,
+            activities=activities
+        )
+    except Exception as e:
+        db.session.rollback()
+        print(f"Deletion error: {e}")
+        flash("Failed to delete the activity")
+        return redirect(url_for('view_department_activity'))
+    
+
+# @app.route('/view_announcements', methods=['GET', 'POST'])
+# @viewer_required
+# def view_announcements():
+#     try:
+#         form = AnnouncementViewForm()
+#         announcements = db.session.query(Announcement)\
+#             .order_by(Announcement.date.desc()).all()
+        
+#         return render_template(
+#             'view_announcements.html',
+#             form=form,
+#             announcements=announcements
+#         )
+#     except Exception as e:
+#         db.session.rollback()
+#         print(f"Deletion error: {e}")
+#         flash("Failed to delete the announcement")
+#         return redirect(url_for('view_announcements'))
+    
+    
+# @app.route('/view_performance_metrics', methods=['GET', 'POST'])
+# @viewer_required
+# def view_performance_metrics():
+#     form = PerformanceMetricsViewForm()
+#     metrics = db.session.query(PerformanceMetrics)\
+#         .order_by(PerformanceMetrics.date.desc()).all()
+    
+#     return render_template(
+#         'view_performance_metrics.html',
+#         form=form,
+#         metrics=metrics
+#     )
+
+# @app.route('/view_department_performance', methods=['GET', 'POST'])
+# @viewer_required
+# def view_department_performance():
+#     form = DepartmentPerformanceViewForm()
+#     departments = Department.query.all()
+    
+#     return render_template(
+#         'view_department_performance.html',
+#         form=form,
+#         departments=departments
+#     )
+
+@app.route('/view_announcements', methods=['GET', 'POST'])
+@viewer_required
+def view_announcements():
+    form = AnnouncementViewForm()
+    announcements = db.session.query(Announcement)\
+        .order_by(Announcement.date.desc()).all()
+    
+    return render_template(
+        'view_announcements.html',
+        form=form,
+        announcements=announcements
+    )
 
 @app.route('/manage_announcements')
 @login_required
@@ -1951,7 +2363,7 @@ def manage_announcements():
     announcements = db.session.execute(db.select(Announcement).filter_by(deleted_at = None)).scalars()  # Fetch non-deleted announcements
     
     
-    return render_template('manage_announcements.html', announcements=announcements, form=form)
+    return render_template('admins/manage_announcements.html', announcements=announcements, form=form)
 
 
 @app.route('/department_activity', methods=['GET', 'POST'])
@@ -1966,9 +2378,10 @@ def department_activity():
     try:
         if request.method == 'POST' and form.validate_on_submit():
             activity_description = form.activity_description.data.strip()
+            new_form_id = db.session.query(db.func.coalesce(db.func.max(DepartmentActivity.form_id), 0) + 1).scalar()
             try:
                 activity_description = request.form['activity_description'].strip()
-                new_activity_description = DepartmentActivity(activity_description=activity_description , created_at=datetime.now())
+                new_activity_description = DepartmentActivity(activity_description=activity_description , created_at=datetime.now(),form_id=new_form_id)
                 db.session.add(new_activity_description)
                 db.session.commit()
                 flash('Department activity successfully recorded!', 'success')
@@ -1988,34 +2401,24 @@ def department_activity():
     activities = db.session.execute(db.select(DepartmentActivity).filter_by(is_deleted = None)).scalars()  # Fetch non-deleted announcements
     return render_template('department_activity.html', activities=activities, form=form)
 
-    
-# @app.route('/view_feedback/<int:campaign_id>', methods=['GET'])
-# @login_required
-# @role_required('admin', 'viewer')
-# def view_feedback(campaign_id):
-#     campaign = Campaign.query.get_or_404(campaign_id)
-#     feedbacks = Feedback.query.filter_by(campaign_id=campaign_id).all()  # Customize this query as needed
-#     return render_template('view_feedback.html', campaign=campaign, feedbacks=feedbacks)
-
-
 
 # Allowed templates that can be accessed
-ALLOWED_TEMPLATES = {'login.html', '.html', 'assign_role.html' , 'add_questions.html', 'dashboard.html' , 'create_campaign.html' , 'general_feedback.html' , 'docket_feedback.html' , 'service_feedback.html', 'manage_dockets.html' , 'manage_announcements.html' , 'department_activity.html'}
+#ALLOWED_TEMPLATES = {'login.html', '.html', 'assign_role.html' , 'add_questions.html', 'dashboard.html' , 'create_campaign.html' , 'general_feedback.html' , 'docket_feedback.html' , 'service_feedback.html', 'manage_dockets.html' , 'manage_announcements.html' , 'department_activity.html'}
 
-@app.route('/view/<path:filename>')
-def secure_serve_template(filename):
-    """
-    Securely serves only allowed HTML templates, preventing directory traversal attacks.
-    """
-    # Allow only letters, numbers, dashes, and underscores in filenames
-    if not re.match(r'^[a-zA-Z0-9_-]+\.html$', filename):
-        abort(403)  # Forbidden access
+# @app.route('/view/<path:filename>')
+# def secure_serve_template(filename):
+#     """
+#     Securely serves only allowed HTML templates, preventing directory traversal attacks.
+#     """
+#     # Allow only letters, numbers, dashes, and underscores in filenames
+#     if not re.match(r'^[a-zA-Z0-9_-]+\.html$', filename):
+#         abort(403)  # Forbidden access
 
-    # Check if the requested file is in the allowed list
-    if filename not in ALLOWED_TEMPLATES:
-        abort(403)  # Forbidden
+#     # Check if the requested file is in the allowed list
+#     if filename not in ALLOWED_TEMPLATES:
+#         abort(403)  # Forbidden
 
-    return render_template(filename)
+#     return render_template(filename)
 
 
 
@@ -2024,4 +2427,3 @@ logging.basicConfig(filename='security.log', level=logging.WARNING)
 def forbidden_access(error):
     logging.warning(f"403 Forbidden: Attempted access by {request.remote_addr} to {request.path}")
     return "Access Forbidden", 403
-

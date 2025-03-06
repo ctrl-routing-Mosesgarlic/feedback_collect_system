@@ -1,6 +1,6 @@
 from flask import redirect
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SubmitField, SelectField, TextAreaField, RadioField, HiddenField, DateTimeField, BooleanField, FileField, FieldList, FormField
+from wtforms import StringField, PasswordField, SubmitField, SelectField, TextAreaField, RadioField, HiddenField, DateTimeField, BooleanField, FileField, FieldList, FormField, DateField
 from wtforms.validators import DataRequired, Email, EqualTo, Length, AnyOf, Optional , ValidationError
 from flask_wtf.file import FileAllowed
 from werkzeug.utils import secure_filename
@@ -134,39 +134,44 @@ class CreateCampaignForm(FlaskForm):
         ],
         render_kw={"placeholder": "Enter campaign title"}
     )
-    
     description = TextAreaField(
-        'Description',
+        'Campaign Description',
         validators=[
             DataRequired(message="Description is required."),
             Length(max=500, message="Description must be less than 500 characters.")
         ],
-        render_kw={"placeholder": "Enter campaign description", "rows": 5}
+        render_kw={"placeholder": "Describe the purpose of this campaign", "rows": 5}
     )
-    
-    feedback_type = HiddenField(
-        'Feedback Type',
-        validators=[
-            DataRequired(),
-            AnyOf(['general', 'docket', 'service'], message='Invalid feedback type')
-        ]
+    campaign_type = SelectField(
+        'Campaign Type',
+        validators=[DataRequired(message="Campaign type is required.")],
+        choices=[('valid', 'valid'), ('invalid', 'invalid')],
+        render_kw={"placeholder": "Select Type"}
     )
-    
+    start_date = DateField(
+        'Start Date',
+        validators=[DataRequired(message="Start date is required.")],
+        format='%Y-%m-%d'
+    )
+    end_date = DateField(
+        'End Date',
+        validators=[DataRequired(message="End date is required.")],
+        format='%Y-%m-%d'
+    )
     submit = SubmitField('Create Campaign')
-
+    
     def validate_title(self, title):
-        # Get the base title without any numbering
+        """
+        Custom validation for the title field.
+        Ensures the title is unique or appends a number if a similar title exists.
+        """
         base_title = title.data.strip()
-        original_title = base_title
-        
-        # Check if similar titles exist
         similar_campaigns = db.session.query(Campaign)\
             .filter(Campaign.title.like(f"{base_title}%"))\
             .order_by(Campaign.title.desc())\
             .all()
             
         if similar_campaigns:
-            # Find the highest number suffix used
             max_number = 0
             for campaign in similar_campaigns:
                 campaign_title = campaign.title
@@ -182,37 +187,24 @@ class CreateCampaignForm(FlaskForm):
                     except ValueError:
                         continue
                         
-            # If exact title exists, append the next number
             if max_number > 0:
                 new_title = f"{base_title} ({max_number + 1})"
-                # Check if the new title exceeds max length
                 if len(new_title) > 100:
                     raise ValidationError("Campaign title would exceed maximum length with added suffix.")
-                title.data = new_title
-                
-        return title
-
-    def validate_description(self, description):
-        if len(description.data) > 500:
-            raise ValidationError("Description must be less than 500 characters.")
-        return description
-
-    def validate_feedback_type(self, feedback_type):
-        if feedback_type.data not in ['general', 'docket', 'service']:
-            raise ValidationError("Invalid feedback type.")
-        return feedback_type
-    
-    def validate(self):
-        if not super().validate():
-            return False
-        return True
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.title.validators.append(self.validate_title)
-        self.description.validators.append(self.validate_description)
-        self.feedback_type.validators.append(self.validate_feedback_type)
-        self.process()
+                # Instead of modifying the data, raise an error and let the user decide
+                raise ValidationError(f"A similar title already exists. Suggested title: {new_title}")
         
+        return True
+        
+    def validate_end_date(self, end_date):
+        """
+        Custom validation for the end_date field.
+        Ensures the end date is after the start date.
+        """
+        if self.start_date.data and end_date.data and end_date.data < self.start_date.data:
+            raise ValidationError("End date must be after start date.")
+        return True
+    
 class QuestionForm(FlaskForm):
     """Form for adding questions to a feedback campaign."""
     question_text = TextAreaField(
